@@ -3,38 +3,41 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import {
   Search, Filter, Plus, MoreVertical, Pencil, Trash2,
   X, ChevronDown, MapPin, Building, GripVertical, CheckCircle, XCircle,
-  Save, RotateCcw, Loader2,
+  Save, RotateCcw, RefreshCw,
 } from 'lucide-react'
-import FilterModal        from '@/components/shared/FilterModal'
-import ConfirmModal       from '@/components/shared/ConfirmModal'
-import { useToast }       from '@/components/shared/toast/ToastProvider'
-import branchService      from '@/services/branchService'
+import FilterModal  from '@/components/shared/FilterModal'
+import ConfirmModal from '@/components/shared/ConfirmModal'
+import BranchModal  from './BranchModal'                     // ← separated file
+import { useToast } from '@/components/shared/toast/ToastProvider'
+import { useAuthStore }  from '@/store/authStore'        
+import { ROLES }    from '@/constants/roles'
+import branchService from '@/services/branchService'
 
 const PRIMARY      = '#C35E33'
 const PRIMARY_DARK = '#A34A24'
-const COUNTRIES    = ['India', 'USA', 'UK', 'Canada', 'Australia', 'UAE']
 const FILTER_CONFIG = [
   { key: 'status', label: 'Status', type: 'multi', options: ['Active', 'Inactive'] },
 ]
 
 // ─── Map API node → local tree node ──────────────────────────────────────────
+// ─── Map API node → local tree node ──────────────────────────────────────────
 const mapApiToLocal = (node) => ({
   id:       node.id,
-  code:     node.branchCode           || '',
-  name:     node.branchName           || '',
-  city:     node.address?.city        || '',
-  state:    node.address?.state       || '',
-  address:  node.address?.address     || '',
-  landmark: node.address?.landmark    || '',
-  district: node.address?.district    || '',
-  pincode:  node.address?.pinCode     || '',
-  country:  node.address?.country     || 'India',
-  active:   node.active               ?? true,
-  parentId: node.parentId             || null,
+  code:     node.branchCode                        || '',
+  name:     node.branchName                        || '',
+  address:  node.address?.addressLine              || '',
+  landmark: node.address?.landmark                 || '',
+  city:     node.address?.city                     || '',
+  district: node.address?.district                 || '',
+  state:    node.address?.state                    || '',
+  pincode:  node.address?.pinCode                  || '',
+  country:  node.address?.country                  || 'India',
+  active:   node.active                            ?? true,
+  parentId: node.parentId                          || null,
   children: (node.children || []).map(mapApiToLocal),
 })
 
-// ─── Flatten tree for reorder API payload ─────────────────────────────────────
+// ─── Flatten tree for reorder API payload ────────────────────────────────────
 const flattenForReorder = (nodes, parentId = null) => {
   const result = []
   nodes.forEach((node, index) => {
@@ -46,7 +49,7 @@ const flattenForReorder = (nodes, parentId = null) => {
   return result
 }
 
-// ─── Utilities ────────────────────────────────────────────────────────────────
+// ─── Deep-clone + tree utilities ─────────────────────────────────────────────
 const deepClone = (obj) => JSON.parse(JSON.stringify(obj))
 
 function findNode(nodes, id, parent = null) {
@@ -66,21 +69,55 @@ function insertAfter(nodes, targetId, nodeToInsert) {
   return false
 }
 
+// ─── Recursive search filter ─────────────────────────────────────────────────
+// Returns a filtered tree where a node is included if it OR any descendant
+// matches the query/status filter. Non-matching sub-trees are pruned.
+function filterTree(nodes, q, statusFilter) {
+  const result = []
+  for (const node of nodes) {
+    const textMatch = !q
+      || node.name.toLowerCase().includes(q)
+      || node.city.toLowerCase().includes(q)
+      || node.code.toLowerCase().includes(q)
+
+    const statusMatch = !statusFilter?.length
+      || statusFilter.some((s) => (s === 'Active' ? node.active : !node.active))
+
+    const selfMatches = textMatch && statusMatch
+
+    // Always recurse into children so sub-branches are searchable
+    const filteredChildren = filterTree(node.children || [], q, statusFilter)
+
+    if (selfMatches) {
+      // Node itself matches → keep it with ALL its original children visible
+      result.push(node)
+    } else if (filteredChildren.length > 0) {
+      // Node doesn't match but some descendant does → include with pruned children
+      result.push({ ...node, children: filteredChildren })
+    }
+  }
+  return result
+}
+
 // ─── StatusBadge ─────────────────────────────────────────────────────────────
 const StatusBadge = ({ active }) => active ? (
-  <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap"
-    style={{ backgroundColor: PRIMARY, color: '#fff' }}>
+  <span
+    className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap"
+    style={{ backgroundColor: PRIMARY, color: '#fff' }}
+  >
     <CheckCircle size={11} /> Active
   </span>
 ) : (
-  <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap"
-    style={{ backgroundColor: '#111827', color: '#fff' }}>
+  <span
+    className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap"
+    style={{ backgroundColor: '#111827', color: '#fff' }}
+  >
     <XCircle size={11} /> Inactive
   </span>
 )
 
 // ─── Action Menu ──────────────────────────────────────────────────────────────
-function ActionMenu({ onEdit, onDelete }) {
+function ActionMenu({ onEdit, onDelete, canDelete }) {
   const [open, setOpen] = useState(false)
   const ref = useRef(null)
 
@@ -107,287 +144,21 @@ function ActionMenu({ onEdit, onDelete }) {
           >
             <Pencil size={13} /> Edit
           </button>
-          <div className="mx-3 h-px bg-gray-100" />
-          <button
-            onClick={() => { onDelete(); setOpen(false) }}
-            className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-medium text-red-600 hover:bg-red-50 transition-colors"
-          >
-            <Trash2 size={13} /> Delete
-          </button>
+
+          {/* Delete is only visible to ADMIN */}
+          {canDelete && (
+            <>
+              <div className="mx-3 h-px bg-gray-100" />
+              <button
+                onClick={() => { onDelete(); setOpen(false) }}
+                className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-medium text-red-600 hover:bg-red-50 transition-colors"
+              >
+                <Trash2 size={13} /> Delete
+              </button>
+            </>
+          )}
         </div>
       )}
-    </div>
-  )
-}
-
-// ─── Branch Modal (Add / Edit) ────────────────────────────────────────────────
-function BranchModal({ mode, initial, onClose, onSave, loading = false }) {
-  const overlayRef = useRef(null)
-  const isEdit     = mode === 'edit'
-
-  const blank = {
-    name: '', code: '', address: '', landmark: '',
-    city: '', district: '', state: '', pincode: '', country: 'India', active: true,
-  }
-  const [form, setForm]     = useState(
-    initial
-      ? {
-          name:     initial.name,     code:     initial.code,
-          address:  initial.address,  landmark: initial.landmark,
-          city:     initial.city,     district: initial.district,
-          state:    initial.state,    pincode:  initial.pincode,
-          country:  initial.country,  active:   initial.active,
-        }
-      : blank
-  )
-  const [errors, setErrors] = useState({})
-
-  useEffect(() => {
-    const h = (e) => { if (e.key === 'Escape' && !loading) onClose() }
-    window.addEventListener('keydown', h)
-    return () => window.removeEventListener('keydown', h)
-  }, [onClose, loading])
-
-  const sf = (k, v) => {
-    setForm((p) => ({ ...p, [k]: v }))
-    setErrors((p) => ({ ...p, [k]: '' }))
-  }
-
-  const validate = () => {
-    const e = {}
-    if (!form.name.trim()) e.name = 'Branch name is required'
-    if (!form.code.trim()) e.code = 'Branch code is required'
-    if (!form.city.trim()) e.city = 'City is required'
-    return e
-  }
-
-  const handleSubmit = () => {
-    const e = validate()
-    if (Object.keys(e).length) { setErrors(e); return }
-    onSave({ ...form })
-  }
-
-  const Field = ({ label, fkey, placeholder, required }) => (
-    <div>
-      <label className="block text-xs font-semibold text-gray-700 mb-1.5">
-        {label} {required && <span style={{ color: PRIMARY }}>*</span>}
-      </label>
-      <input
-        type="text"
-        value={form[fkey]}
-        onChange={(e) => sf(fkey, e.target.value)}
-        placeholder={placeholder}
-        disabled={loading}
-        className="w-full h-10 px-3.5 text-sm text-gray-800 bg-gray-50 border rounded-xl outline-none placeholder:text-gray-400 transition-colors disabled:opacity-60"
-        style={{ borderColor: errors[fkey] ? '#EF4444' : '#E5E7EB' }}
-        onFocus={(e) => { e.target.style.borderColor = PRIMARY }}
-        onBlur={(e)  => { e.target.style.borderColor = errors[fkey] ? '#EF4444' : '#E5E7EB' }}
-      />
-      {errors[fkey] && <p className="text-[11px] text-red-500 mt-0.5">⚠ {errors[fkey]}</p>}
-    </div>
-  )
-
-  return (
-    <div
-      ref={overlayRef}
-      onClick={(e) => { if (e.target === overlayRef.current && !loading) onClose() }}
-      className="fixed inset-0 z-50 flex items-center justify-center"
-      style={{ backgroundColor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(3px)' }}
-    >
-      <div
-        className="bg-white rounded-2xl shadow-2xl w-full flex flex-col"
-        style={{ maxWidth: 680, maxHeight: '92vh', margin: '0 16px' }}
-      >
-        {/* Header */}
-        <div
-          className="flex items-center justify-between px-6 py-4 rounded-t-2xl flex-shrink-0"
-          style={{ backgroundColor: '#111827' }}
-        >
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: PRIMARY }}>
-              <Building size={16} color="#fff" />
-            </div>
-            <h2 className="text-white font-semibold text-sm">{isEdit ? 'Edit Branch' : 'Add Branch'}</h2>
-          </div>
-          <button
-            onClick={onClose}
-            disabled={loading}
-            className="w-8 h-8 rounded-lg bg-gray-700 flex items-center justify-center text-gray-300 hover:bg-gray-600 transition-colors disabled:opacity-40"
-          >
-            <X size={15} />
-          </button>
-        </div>
-
-        {/* Body */}
-        <div className="flex-1 overflow-y-auto px-6 py-5">
-          <div className="border rounded-xl p-5" style={{ borderColor: PRIMARY }}>
-
-            {/* Row 1: name + code */}
-            <div className="grid grid-cols-2 gap-4 mb-4">
-              <Field label="Branch Name" fkey="name" placeholder="Enter Branch Name" required />
-              <Field label="Branch Code" fkey="code" placeholder="GMT001" required />
-            </div>
-
-            {/* Row 2: address + landmark */}
-            <div className="grid grid-cols-2 gap-4 mb-4">
-              <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1.5">Address</label>
-                <textarea
-                  value={form.address}
-                  onChange={(e) => sf('address', e.target.value)}
-                  placeholder="Enter full address"
-                  rows={3}
-                  disabled={loading}
-                  className="w-full px-3.5 py-2.5 text-sm text-gray-800 bg-gray-50 border border-gray-200 rounded-xl outline-none resize-none placeholder:text-gray-400 transition-colors disabled:opacity-60"
-                  onFocus={(e) => { e.target.style.borderColor = PRIMARY }}
-                  onBlur={(e)  => { e.target.style.borderColor = '#E5E7EB' }}
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1.5">Landmark</label>
-                <input
-                  type="text"
-                  value={form.landmark}
-                  onChange={(e) => sf('landmark', e.target.value)}
-                  placeholder="Near landmark"
-                  disabled={loading}
-                  className="w-full h-10 px-3.5 text-sm text-gray-800 bg-gray-50 border border-gray-200 rounded-xl outline-none placeholder:text-gray-400 transition-colors disabled:opacity-60"
-                  onFocus={(e) => { e.target.style.borderColor = PRIMARY }}
-                  onBlur={(e)  => { e.target.style.borderColor = '#E5E7EB' }}
-                />
-              </div>
-            </div>
-
-            {/* Row 3: city + district + state */}
-            <div className="grid grid-cols-3 gap-4 mb-4">
-              <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1.5">
-                  City <span style={{ color: PRIMARY }}>*</span>
-                </label>
-                <input
-                  type="text"
-                  value={form.city}
-                  onChange={(e) => sf('city', e.target.value)}
-                  placeholder="City"
-                  disabled={loading}
-                  className="w-full h-10 px-3.5 text-sm text-gray-800 bg-gray-50 border rounded-xl outline-none placeholder:text-gray-400 transition-colors disabled:opacity-60"
-                  style={{ borderColor: errors.city ? '#EF4444' : '#E5E7EB' }}
-                  onFocus={(e) => { e.target.style.borderColor = PRIMARY }}
-                  onBlur={(e)  => { e.target.style.borderColor = errors.city ? '#EF4444' : '#E5E7EB' }}
-                />
-                {errors.city && <p className="text-[11px] text-red-500 mt-0.5">⚠ {errors.city}</p>}
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1.5">District</label>
-                <input
-                  type="text"
-                  value={form.district}
-                  onChange={(e) => sf('district', e.target.value)}
-                  placeholder="District"
-                  disabled={loading}
-                  className="w-full h-10 px-3.5 text-sm text-gray-800 bg-gray-50 border border-gray-200 rounded-xl outline-none placeholder:text-gray-400 transition-colors disabled:opacity-60"
-                  onFocus={(e) => { e.target.style.borderColor = PRIMARY }}
-                  onBlur={(e)  => { e.target.style.borderColor = '#E5E7EB' }}
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1.5">State</label>
-                <input
-                  type="text"
-                  value={form.state}
-                  onChange={(e) => sf('state', e.target.value)}
-                  placeholder="Gujarat"
-                  disabled={loading}
-                  className="w-full h-10 px-3.5 text-sm text-gray-800 bg-gray-50 border border-gray-200 rounded-xl outline-none placeholder:text-gray-400 transition-colors disabled:opacity-60"
-                  onFocus={(e) => { e.target.style.borderColor = PRIMARY }}
-                  onBlur={(e)  => { e.target.style.borderColor = '#E5E7EB' }}
-                />
-              </div>
-            </div>
-
-            {/* Row 4: pincode + country + status */}
-            <div className="grid grid-cols-3 gap-4">
-              <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1.5">Pincode</label>
-                <input
-                  type="text"
-                  value={form.pincode}
-                  onChange={(e) => sf('pincode', e.target.value)}
-                  placeholder="380054"
-                  disabled={loading}
-                  className="w-full h-10 px-3.5 text-sm text-gray-800 bg-gray-50 border border-gray-200 rounded-xl outline-none placeholder:text-gray-400 transition-colors disabled:opacity-60"
-                  onFocus={(e) => { e.target.style.borderColor = PRIMARY }}
-                  onBlur={(e)  => { e.target.style.borderColor = '#E5E7EB' }}
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1.5">Country</label>
-                <select
-                  value={form.country}
-                  onChange={(e) => sf('country', e.target.value)}
-                  disabled={loading}
-                  className="w-full h-10 px-3.5 text-sm text-gray-800 bg-gray-50 border border-gray-200 rounded-xl outline-none appearance-none cursor-pointer transition-colors disabled:opacity-60"
-                  onFocus={(e) => { e.target.style.borderColor = PRIMARY }}
-                  onBlur={(e)  => { e.target.style.borderColor = '#E5E7EB' }}
-                >
-                  {COUNTRIES.map((c) => <option key={c}>{c}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-2">Status</label>
-                <div className="flex items-center gap-5 mt-1">
-                  {[{ label: 'Active', val: true }, { label: 'Inactive', val: false }].map(({ label, val }) => (
-                    <label
-                      key={label}
-                      className="flex items-center gap-2 cursor-pointer select-none text-sm text-gray-600"
-                      onClick={() => !loading && sf('active', val)}
-                    >
-                      <span
-                        className="w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all"
-                        style={{
-                          borderColor:     form.active === val ? PRIMARY : '#D1D5DB',
-                          backgroundColor: form.active === val ? PRIMARY : 'transparent',
-                        }}
-                      >
-                        {form.active === val && <span className="w-2 h-2 rounded-full bg-white" />}
-                      </span>
-                      {label}
-                    </label>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-          </div>
-        </div>
-
-        {/* Footer */}
-        <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-3 flex-shrink-0">
-          <button
-            onClick={onClose}
-            disabled={loading}
-            className="px-5 py-2 rounded-xl border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-50"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleSubmit}
-            disabled={loading}
-            className="px-5 py-2 rounded-xl text-sm font-semibold text-white transition-colors flex items-center gap-2 disabled:opacity-60"
-            style={{ backgroundColor: '#111827' }}
-            onMouseEnter={(e) => !loading && (e.currentTarget.style.backgroundColor = '#1F2937')}
-            onMouseLeave={(e) => !loading && (e.currentTarget.style.backgroundColor = '#111827')}
-          >
-            {loading && (
-              <svg className="animate-spin w-3.5 h-3.5" viewBox="0 0 24 24" fill="none">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-              </svg>
-            )}
-            {isEdit ? 'Update Branch' : 'Save Branch'}
-          </button>
-        </div>
-      </div>
     </div>
   )
 }
@@ -419,6 +190,7 @@ function BranchNode({
   onAdd, onEdit, onDelete,
   dragging, dragOverId, setDragOverId,
   onDragStart, onDragEnd, onDrop,
+  canDelete,
 }) {
   const hasChildren = node.children?.length > 0
   const isExpanded  = expandedIds.has(node.id)
@@ -428,7 +200,6 @@ function BranchNode({
 
   return (
     <div>
-      {/* Drop indicator */}
       {isDragOver && dragging !== node.id && (
         <div
           className="h-0.5 rounded-full transition-all"
@@ -460,8 +231,8 @@ function BranchNode({
           onClick={() => hasChildren && toggleExpand(node.id)}
           className="w-5 h-5 flex items-center justify-center flex-shrink-0"
           style={{
-            opacity:   hasChildren ? 1 : 0,
-            transform: isExpanded ? 'rotate(0deg)' : 'rotate(-90deg)',
+            opacity:    hasChildren ? 1 : 0,
+            transform:  isExpanded ? 'rotate(0deg)' : 'rotate(-90deg)',
             transition: 'transform 200ms ease',
           }}
         >
@@ -503,6 +274,7 @@ function BranchNode({
         <ActionMenu
           onEdit={() => onEdit(node)}
           onDelete={() => onDelete(node)}
+          canDelete={canDelete}
         />
       </div>
 
@@ -525,6 +297,7 @@ function BranchNode({
               onDragStart={onDragStart}
               onDragEnd={onDragEnd}
               onDrop={onDrop}
+              canDelete={canDelete}
             />
           ))}
         </div>
@@ -535,41 +308,44 @@ function BranchNode({
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function BranchManagement() {
-  const { toast } = useToast()
+  const { toast }       = useToast()
+  const { user } = useAuthStore()
 
-  // ── Data & loading ────────────────────────────────────────────────────────
+  // Only ADMIN can delete (HR cannot)
+  const canDelete       = user?.role === ROLES.ADMIN
+
+  // ── Data & loading ─────────────────────────────────────────────────────────
   const [tree,         setTree]         = useState([])
   const [loading,      setLoading]      = useState(true)
   const [modalSaving,  setModalSaving]  = useState(false)
   const [deleting,     setDeleting]     = useState(false)
   const [savingLayout, setSavingLayout] = useState(false)
 
-  // ── UI ────────────────────────────────────────────────────────────────────
+  // ── UI ─────────────────────────────────────────────────────────────────────
   const [search,           setSearch]           = useState('')
   const [showFilter,       setShowFilter]       = useState(false)
   const [activeFilters,    setActiveFilters]    = useState({})
   const [expandedIds,      setExpandedIds]      = useState(new Set())
   const [hasUnsavedLayout, setHasUnsavedLayout] = useState(false)
 
-  // ── Modals ────────────────────────────────────────────────────────────────
-  const [modalMode,          setModalMode]          = useState(null)   // 'add' | 'edit' | null
-  const [editTarget,         setEditTarget]         = useState(null)
-  const [addParentId,        setAddParentId]        = useState(null)
-  const [deleteTarget,       setDeleteTarget]       = useState(null)
-  const [showSaveConfirm,    setShowSaveConfirm]    = useState(false)
+  // ── Modals ─────────────────────────────────────────────────────────────────
+  const [modalMode,       setModalMode]       = useState(null)   // 'add' | 'edit' | null
+  const [editTarget,      setEditTarget]      = useState(null)
+  const [addParentId,     setAddParentId]     = useState(null)
+  const [deleteTarget,    setDeleteTarget]    = useState(null)
+  const [showSaveConfirm, setShowSaveConfirm] = useState(false)
 
-  // ── Drag ──────────────────────────────────────────────────────────────────
+  // ── Drag ───────────────────────────────────────────────────────────────────
   const [dragging,   setDragging]   = useState(null)
   const [dragOverId, setDragOverId] = useState(null)
 
-  // ─── Fetch tree ────────────────────────────────────────────────────────────
+  // ─── Fetch tree ─────────────────────────────────────────────────────────────
   const fetchTree = useCallback(async (silent = false) => {
     if (!silent) setLoading(true)
     try {
       const res    = await branchService.getTree()
       const mapped = (res?.data || []).map(mapApiToLocal)
       setTree(mapped)
-      // Auto-expand all root nodes on first load
       if (!silent && mapped.length > 0) {
         setExpandedIds(new Set(mapped.map((n) => n.id)))
       }
@@ -583,14 +359,14 @@ export default function BranchManagement() {
 
   useEffect(() => { fetchTree() }, [fetchTree])
 
-  // ── Toggle expand ─────────────────────────────────────────────────────────
+  // ── Toggle expand ──────────────────────────────────────────────────────────
   const toggleExpand = (id) => setExpandedIds((prev) => {
     const next = new Set(prev)
     next.has(id) ? next.delete(id) : next.add(id)
     return next
   })
 
-  // ── Save (Add / Edit) ─────────────────────────────────────────────────────
+  // ── Save (Add / Edit) ──────────────────────────────────────────────────────
   const handleSave = async (form) => {
     setModalSaving(true)
     try {
@@ -601,7 +377,6 @@ export default function BranchManagement() {
         await branchService.update(editTarget.id, form)
         toast.success('Branch updated successfully', 'Updated')
       }
-      // Close modal first, then silently refresh tree
       setModalMode(null)
       setEditTarget(null)
       setAddParentId(null)
@@ -613,16 +388,15 @@ export default function BranchManagement() {
     }
   }
 
-  // ── Delete ────────────────────────────────────────────────────────────────
+  // ── Delete (soft-delete) ───────────────────────────────────────────────────
+  // The backend performs a true soft-delete (sets deleted=true); the record
+  // disappears from the listing but remains in the database.
   const handleConfirmDelete = async () => {
     if (!deleteTarget) return
     setDeleting(true)
     try {
       await branchService.delete(deleteTarget.id)
-      toast.success(
-        `"${deleteTarget.name}" deactivated successfully`,
-        'Branch Deleted'
-      )
+      toast.success(`"${deleteTarget.name}" has been deleted`, 'Branch Deleted')
       await fetchTree(true)
       setDeleteTarget(null)
     } catch (err) {
@@ -632,7 +406,7 @@ export default function BranchManagement() {
     }
   }
 
-  // ── Drag & Drop ───────────────────────────────────────────────────────────
+  // ── Drag & Drop ────────────────────────────────────────────────────────────
   const handleDragStart = useCallback((id) => setDragging(id), [])
   const handleDragEnd   = useCallback(() => { setDragging(null); setDragOverId(null) }, [])
 
@@ -655,7 +429,7 @@ export default function BranchManagement() {
     setDragOverId(null)
   }, [dragging])
 
-  // ── Save Layout ───────────────────────────────────────────────────────────
+  // ── Save Layout ────────────────────────────────────────────────────────────
   const handleConfirmSaveLayout = async () => {
     setSavingLayout(true)
     try {
@@ -673,11 +447,11 @@ export default function BranchManagement() {
   }
 
   const handleResetLayout = async () => {
-    await fetchTree()       // full reload restores server order
+    await fetchTree()
     toast.info('Layout reset to last saved state', 'Reset')
   }
 
-  // ── Stats ─────────────────────────────────────────────────────────────────
+  // ── Stats ──────────────────────────────────────────────────────────────────
   const countAll    = (nodes) => nodes.reduce((a, n) => a + 1 + countAll(n.children), 0)
   const countActive = (nodes) => nodes.reduce((a, n) => a + (n.active ? 1 : 0) + countActive(n.children), 0)
   const total  = countAll(tree)
@@ -686,23 +460,17 @@ export default function BranchManagement() {
     Array.isArray(v) ? v.length > 0 : !!v
   ).length
 
-  // ── Filter tree (top-level only search) ───────────────────────────────────
-  const filteredTree = (search || activeFilters.status?.length)
-    ? tree.filter((n) => {
-        const q  = search.toLowerCase()
-        const sm = !q || n.name.toLowerCase().includes(q)
-                       || n.city.toLowerCase().includes(q)
-                       || n.code.toLowerCase().includes(q)
-        const st = !activeFilters.status?.length
-                   || activeFilters.status.some((s) => s === 'Active' ? n.active : !n.active)
-        return sm && st
-      })
+  // ── Recursive filter ────────────────────────────────────────────────────────
+  // filterTree handles sub-branch search and status filtering in one pass
+  const q            = search.toLowerCase()
+  const filteredTree = (q || activeFilters.status?.length)
+    ? filterTree(tree, q, activeFilters.status)
     : tree
 
-  // ── Render ────────────────────────────────────────────────────────────────
+  // ─── Render ─────────────────────────────────────────────────────────────────
   return (
     <>
-      {/* ── Page header ─────────────────────────────────────────────────── */}
+      {/* ── Page header ───────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between mb-5 gap-3 flex-wrap">
         <div>
           <h1 className="text-xl font-bold text-gray-900 m-0">Work Location &amp; Branch</h1>
@@ -710,18 +478,32 @@ export default function BranchManagement() {
             Manage branch hierarchy — drag rows to reorder
           </p>
         </div>
-        <button
-          onClick={() => { setAddParentId(null); setModalMode('add') }}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white transition-colors"
-          style={{ backgroundColor: '#111827' }}
-          onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#1F2937')}
-          onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = '#111827')}
-        >
-          <Plus size={15} strokeWidth={2.5} /> Add Branch
-        </button>
+
+        <div className="flex items-center gap-2">
+          {/* Refresh button */}
+          <button
+            onClick={() => fetchTree()}
+            disabled={loading}
+            className="w-9 h-9 flex items-center justify-center rounded-xl border border-gray-200 text-gray-500 hover:bg-gray-50 transition-colors disabled:opacity-50"
+            title="Refresh"
+          >
+            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+          </button>
+
+          {/* Add branch */}
+          <button
+            onClick={() => { setAddParentId(null); setModalMode('add') }}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white transition-colors"
+            style={{ backgroundColor: '#111827' }}
+            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#1F2937')}
+            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = '#111827')}
+          >
+            <Plus size={15} strokeWidth={2.5} /> Add Branch
+          </button>
+        </div>
       </div>
 
-      {/* ── Unsaved layout banner ────────────────────────────────────────── */}
+      {/* ── Unsaved layout banner ─────────────────────────────────────────── */}
       {hasUnsavedLayout && (
         <div
           className="flex items-center justify-between px-4 py-3 rounded-xl mb-4 border gap-3 flex-wrap"
@@ -758,11 +540,11 @@ export default function BranchManagement() {
         </div>
       )}
 
-      {/* ── Stats cards ──────────────────────────────────────────────────── */}
+      {/* ── Stats cards ───────────────────────────────────────────────────── */}
       <div className="grid grid-cols-3 gap-3 mb-5">
         {[
-          { label: 'Total Branches', value: total,         color: '#111827', bg: '#F3F4F6' },
-          { label: 'Active',         value: active,        color: '#15803D', bg: '#DCFCE7' },
+          { label: 'Total Branches', value: total,          color: '#111827', bg: '#F3F4F6' },
+          { label: 'Active',         value: active,         color: '#15803D', bg: '#DCFCE7' },
           { label: 'Inactive',       value: total - active, color: '#B91C1C', bg: '#FEE2E2' },
         ].map(({ label, value, color, bg }) => (
           <div
@@ -785,7 +567,7 @@ export default function BranchManagement() {
         ))}
       </div>
 
-      {/* ── Toolbar ──────────────────────────────────────────────────────── */}
+      {/* ── Toolbar ───────────────────────────────────────────────────────── */}
       <div className="flex items-center gap-2 mb-4 flex-wrap">
         <label
           className="flex items-center gap-2 bg-white rounded-xl px-3 h-10 border border-gray-200 cursor-text flex-1"
@@ -796,7 +578,7 @@ export default function BranchManagement() {
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search name, city or code…"
+            placeholder="Search name, city, code or sub-branch…"
             className="border-none outline-none text-[13px] text-gray-900 bg-transparent w-full"
             onFocus={(e) => { e.target.parentElement.style.borderColor = PRIMARY }}
             onBlur={(e)  => { e.target.parentElement.style.borderColor = '#E5E7EB' }}
@@ -832,23 +614,23 @@ export default function BranchManagement() {
         </button>
       </div>
 
-      {/* ── Drag hint ────────────────────────────────────────────────────── */}
+      {/* ── Drag hint ─────────────────────────────────────────────────────── */}
       <div className="flex items-center gap-2 mb-3 px-1">
         <GripVertical size={13} color="#9CA3AF" />
         <p className="text-[11px] text-gray-400">
-          Drag rows to reorder — a <span className="font-semibold text-amber-600">Save Layout</span> button
+          Drag rows to reorder — a{' '}
+          <span className="font-semibold text-amber-600">Save Layout</span> button
           will appear to persist the new order
         </p>
       </div>
 
-      {/* ── Tree ─────────────────────────────────────────────────────────── */}
+      {/* ── Tree ──────────────────────────────────────────────────────────── */}
       <div
         className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden"
         onDragOver={(e) => e.preventDefault()}
         onDragLeave={() => setDragOverId(null)}
       >
         {loading ? (
-          /* skeleton */
           <div>
             {[0, 1, 2, 3, 4].map((i) => (
               <SkeletonRow key={i} indent={i > 1 ? 48 : 0} />
@@ -881,12 +663,13 @@ export default function BranchManagement() {
               onDragStart={handleDragStart}
               onDragEnd={handleDragEnd}
               onDrop={handleDrop}
+              canDelete={canDelete}
             />
           ))
         )}
       </div>
 
-      {/* ── Branch Add / Edit Modal ───────────────────────────────────────── */}
+      {/* ── Branch Add / Edit Modal (separate file) ───────────────────────── */}
       {(modalMode === 'add' || modalMode === 'edit') && (
         <BranchModal
           mode={modalMode}
@@ -903,24 +686,23 @@ export default function BranchManagement() {
         />
       )}
 
-      {/* ── Delete Confirm (shared ConfirmModal) ─────────────────────────── */}
+      {/* ── Delete Confirm ────────────────────────────────────────────────── */}
       <ConfirmModal
         isOpen={!!deleteTarget}
         onClose={() => { if (!deleting) setDeleteTarget(null) }}
         onConfirm={handleConfirmDelete}
         title="Delete Branch"
         description={
-          deleteTarget
-            ? (
-              <>
-                Are you sure you want to deactivate{' '}
-                <strong>"{deleteTarget.name} ({deleteTarget.code})"</strong>?
-                {deleteTarget.children?.length > 0
-                  ? ' All child branches will also be affected.'
-                  : ''}
-              </>
-            )
-            : ''
+          deleteTarget ? (
+            <>
+              Are you sure you want to permanently delete{' '}
+              <strong>"{deleteTarget.name} ({deleteTarget.code})"</strong>?
+              {deleteTarget.children?.length > 0
+                ? ' All child branches will also be soft-deleted.'
+                : ''}
+              {' '}The record will be hidden from all listings but retained in the database.
+            </>
+          ) : ''
         }
         confirmLabel="Delete"
         cancelLabel="Cancel"
@@ -928,7 +710,7 @@ export default function BranchManagement() {
         loading={deleting}
       />
 
-      {/* ── Save Layout Confirm (shared ConfirmModal) ─────────────────────── */}
+      {/* ── Save Layout Confirm ───────────────────────────────────────────── */}
       <ConfirmModal
         isOpen={showSaveConfirm}
         onClose={() => { if (!savingLayout) setShowSaveConfirm(false) }}
@@ -937,7 +719,7 @@ export default function BranchManagement() {
         description="This will save the current branch order and hierarchy to the database. The new arrangement will be visible to all users."
         confirmLabel="Save Layout"
         cancelLabel="Cancel"
-        variant="info"
+        variant="warning"   // ← theme-consistent (amber) instead of blue
         loading={savingLayout}
       />
 

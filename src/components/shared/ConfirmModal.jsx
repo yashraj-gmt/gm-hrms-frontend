@@ -1,14 +1,4 @@
-// Usage anywhere:
-//   <ConfirmModal
-//     isOpen={!!deleteTarget}
-//     onClose={() => setDeleteTarget(null)}
-//     onConfirm={() => handleDelete(deleteTarget.id)}
-//     title="Delete Shift"
-//     description={<>Are you sure you want to delete <strong>"{deleteTarget?.shiftName}"</strong>? This action performs a soft delete.</>}
-//     confirmLabel="Delete"
-//     variant="danger"          // "danger" | "warning" | "info"
-//     loading={deleting}
-//   />
+
 
 import { useEffect, useRef, useState } from 'react'
 import { X, Trash2, AlertTriangle, Info } from 'lucide-react'
