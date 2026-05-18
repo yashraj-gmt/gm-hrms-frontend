@@ -7,7 +7,7 @@ import {
 } from 'lucide-react'
 import FilterModal  from '@/components/shared/FilterModal'
 import ConfirmModal from '@/components/shared/ConfirmModal'
-import BranchModal  from './BranchModal'                     // ← separated file
+import BranchModal  from './BranchModal'                     
 import { useToast } from '@/components/shared/toast/ToastProvider'
 import { useAuthStore }  from '@/store/authStore'        
 import { ROLES }    from '@/constants/roles'
@@ -19,8 +19,7 @@ const FILTER_CONFIG = [
   { key: 'status', label: 'Status', type: 'multi', options: ['Active', 'Inactive'] },
 ]
 
-// ─── Map API node → local tree node ──────────────────────────────────────────
-// ─── Map API node → local tree node ──────────────────────────────────────────
+// ─── Map API node → local tree node 
 const mapApiToLocal = (node) => ({
   id:       node.id,
   code:     node.branchCode                        || '',

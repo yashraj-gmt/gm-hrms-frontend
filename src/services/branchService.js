@@ -27,10 +27,10 @@ const mapFormToUpdateRequest = (form) => ({
   address:    buildAddressPayload(form),
 })
 
-// ─── Service ─────────────────────────────────────────────────────────────────
+// Service
 const branchService = {
 
-  /** GET /api/branches/tree — full nested hierarchy */
+  /** GET /api/branches/tree*/
   getTree: () => apiClient.get('/branches/tree'),
 
   /** GET /api/branches/:id */

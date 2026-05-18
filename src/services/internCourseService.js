@@ -1,14 +1,5 @@
 // src/services/internCourseService.js
-// ─── All Intern Course API calls ──────────────────────────────────────────────
-// Backend base: /api/intern-courses
-//
-// Endpoints:
-//   POST   /api/intern-courses
-//   PATCH  /api/intern-courses/:id
-//   DELETE /api/intern-courses/:id      ← soft delete (sets status = false)
-//   GET    /api/intern-courses?page&size
-//   GET    /api/intern-courses/:id
-//   GET    /api/intern-courses/stats
+
 
 import apiClient from './apiClient'
 

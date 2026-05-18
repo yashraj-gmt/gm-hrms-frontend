@@ -1,26 +1,31 @@
 // src/pages/masterdata/interncourse/InternCourseManagement.jsx
-// ─── API endpoints (via internCourseService) ──────────────────────────────────
-//   POST   /api/intern-courses
-//   PATCH  /api/intern-courses/:id
-//   DELETE /api/intern-courses/:id   soft delete → stays in list as Inactive
-//   GET    /api/intern-courses?page&size
-//   GET    /api/intern-courses/stats
 
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import {
   Search, Plus, MoreVertical, Pencil, Trash2,
   X, ChevronLeft, ChevronRight, CheckCircle, XCircle,
-  BookOpen, ClipboardList, RefreshCw, AlertCircle,
+  BookOpen, ClipboardList, RefreshCw, AlertCircle, Filter,
 } from 'lucide-react'
 import internCourseService from '@/services/internCourseService'
+import FilterModal         from '@/components/shared/FilterModal'
+import ConfirmModal        from '@/components/shared/ConfirmModal'
 import { useToast }        from '@/components/shared/toast/ToastProvider'
+import { useAuthStore }    from '@/store/authStore'
+import { ROLES }           from '@/constants/roles'
 
 const PRIMARY   = '#C35E33'
 const PAGE_SIZE = 10
 
-// Status filter options (client-side)
-const STATUS_OPTIONS = ['All', 'Active', 'Inactive']
+// ── Filter config for shared FilterModal ──────────────────────────────────────
+const FILTER_CONFIG = [
+  {
+    key:     'status',
+    label:   'Status',
+    type:    'multi',
+    options: ['Active', 'Inactive'],
+  },
+]
 
 // ─── Status Badge ─────────────────────────────────────────────────────────────
 function StatusBadge({ active }) {
@@ -37,57 +42,21 @@ function StatusBadge({ active }) {
   )
 }
 
-// ─── Status Filter Tabs ───────────────────────────────────────────────────────
-function StatusTabs({ value, onChange }) {
-  return (
-    <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-xl">
-      {STATUS_OPTIONS.map((opt) => (
-        <button
-          key={opt}
-          type="button"
-          onClick={() => onChange(opt)}
-          className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap"
-          style={{
-            backgroundColor: value === opt ? '#fff' : 'transparent',
-            color:           value === opt ? '#111827' : '#6B7280',
-            boxShadow:       value === opt ? '0 1px 3px rgba(0,0,0,0.10)' : 'none',
-          }}
-        >
-          {opt}
-        </button>
-      ))}
-    </div>
-  )
-}
-
 // ─── Action Menu (portal-based) ───────────────────────────────────────────────
-// Uses createPortal so the dropdown renders in <body> and escapes
-// the table's overflow-x-auto / overflow-hidden clipping entirely.
-//
-// FIX: the previous version listened for 'mousedown' on document and checked
-// only btnRef — so clicking an item inside the portal triggered the close
-// handler BEFORE the button's onClick fired, unmounting the dropdown and
-// swallowing the action entirely.
-// Solution: track the dropdown panel in dropdownRef too, and only close when
-// the click is outside BOTH the trigger button AND the dropdown panel.
-function ActionMenu({ onEdit, onDeactivate, isActive }) {
-  const [open, setOpen]     = useState(false)
-  const [pos,  setPos]      = useState({ top: 0, left: 0 })
-  const btnRef              = useRef(null)
-  const dropdownRef         = useRef(null)
+function ActionMenu({ onEdit, onDelete, canDelete }) {
+  const [open, setOpen] = useState(false)
+  const [pos,  setPos]  = useState({ top: 0, left: 0 })
+  const btnRef          = useRef(null)
+  const dropdownRef     = useRef(null)
 
   useEffect(() => {
     if (!open) return
-
     const handleMouseDown = (e) => {
       const insideBtn      = btnRef.current      && btnRef.current.contains(e.target)
       const insideDropdown = dropdownRef.current && dropdownRef.current.contains(e.target)
-      // Only close when the click is truly outside both elements
       if (!insideBtn && !insideDropdown) setOpen(false)
     }
-
     const handleScroll = () => setOpen(false)
-
     document.addEventListener('mousedown', handleMouseDown)
     document.addEventListener('scroll',    handleScroll, true)
     return () => {
@@ -109,42 +78,30 @@ function ActionMenu({ onEdit, onDeactivate, isActive }) {
 
   return (
     <>
-      <button
-        ref={btnRef}
-        onClick={handleToggle}
-        className="w-8 h-8 flex items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:border-gray-400 hover:bg-gray-50 transition-all"
-      >
+      <button ref={btnRef} onClick={handleToggle}
+        className="w-8 h-8 flex items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:border-gray-400 hover:bg-gray-50 transition-all">
         <MoreVertical size={15} />
       </button>
 
       {open && createPortal(
-        <div
-          ref={dropdownRef}
-          style={{
-            position : 'absolute',
-            top      : pos.top,
-            left     : pos.left,
-            width    : 160,
-            zIndex   : 9999,
-          }}
-          className="bg-white rounded-xl shadow-2xl border border-gray-100 overflow-hidden"
-        >
+        <div ref={dropdownRef}
+          style={{ position: 'absolute', top: pos.top, left: pos.left, width: 160, zIndex: 9999 }}
+          className="bg-white rounded-xl shadow-2xl border border-gray-100 overflow-hidden">
           <button
-            onMouseDown={(e) => e.stopPropagation()}   // prevent document handler from seeing this
+            onMouseDown={(e) => e.stopPropagation()}
             onClick={() => { setOpen(false); onEdit() }}
-            className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-medium text-gray-700 hover:bg-orange-50 hover:text-[#C35E33] transition-colors"
-          >
+            className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-medium text-gray-700 hover:bg-orange-50 hover:text-[#C35E33] transition-colors">
             <Pencil size={13} /> Edit
           </button>
-          {isActive && (
+
+          {canDelete && (
             <>
               <div className="mx-3 h-px bg-gray-100" />
               <button
-                onMouseDown={(e) => e.stopPropagation()}   // prevent document handler from seeing this
-                onClick={() => { setOpen(false); onDeactivate() }}
-                className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-medium text-amber-600 hover:bg-amber-50 transition-colors"
-              >
-                <Trash2 size={13} /> Deactivate
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={() => { setOpen(false); onDelete() }}
+                className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-medium text-red-600 hover:bg-red-50 transition-colors">
+                <Trash2 size={13} /> Delete
               </button>
             </>
           )}
@@ -175,7 +132,10 @@ function CourseModal({ mode, initial, onClose, onSaved }) {
     return () => window.removeEventListener('keydown', h)
   }, [onClose, loading])
 
-  const sf = (k, v) => { setForm((p) => ({ ...p, [k]: v })); setErrors((p) => ({ ...p, [k]: '' })) }
+  const sf = (k, v) => {
+    setForm((p) => ({ ...p, [k]: v }))
+    setErrors((p) => ({ ...p, [k]: '' }))
+  }
 
   const validate = () => {
     const e = {}
@@ -188,11 +148,11 @@ function CourseModal({ mode, initial, onClose, onSaved }) {
     if (Object.keys(e).length) { setErrors(e); return }
     setLoading(true)
 
-    // Map frontend 'active' → backend 'status'
+    // Send 'active' for status toggle; backend mapper reads dto.getActive()
     const payload = {
       name:        form.name.trim(),
       description: form.description.trim() || null,
-      status:      form.active,
+      active:      form.active,
     }
 
     try {
@@ -217,7 +177,6 @@ function CourseModal({ mode, initial, onClose, onSaved }) {
       onClick={(e) => { if (e.target === overlayRef.current && !loading) onClose() }}
       className="fixed inset-0 z-50 flex items-center justify-center"
       style={{ backgroundColor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(3px)' }}>
-
       <div className="bg-white rounded-2xl shadow-2xl w-full flex flex-col"
         style={{ maxWidth: 560, margin: '0 16px' }}>
 
@@ -225,7 +184,8 @@ function CourseModal({ mode, initial, onClose, onSaved }) {
         <div className="flex items-center justify-between px-6 py-4 rounded-t-2xl"
           style={{ backgroundColor: '#111827' }}>
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: PRIMARY }}>
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center"
+              style={{ backgroundColor: PRIMARY }}>
               <BookOpen size={16} color="#fff" />
             </div>
             <h2 className="text-white font-semibold text-sm">
@@ -272,7 +232,7 @@ function CourseModal({ mode, initial, onClose, onSaved }) {
               onBlur={(e)  => (e.target.style.borderColor = '#E5E7EB')} />
           </div>
 
-          {/* Status — only shown in Edit */}
+          {/* Status — only in Edit mode */}
           {isEdit && (
             <div>
               <label className="block text-xs font-semibold text-gray-700 mb-2">Status</label>
@@ -321,80 +281,6 @@ function CourseModal({ mode, initial, onClose, onSaved }) {
   )
 }
 
-// ─── Deactivate Confirm Modal ─────────────────────────────────────────────────
-function DeactivateModal({ course, onClose, onDeactivated }) {
-  const { toast }  = useToast()
-  const overlayRef = useRef(null)
-  const [loading, setLoading] = useState(false)
-
-  useEffect(() => {
-    const h = (e) => { if (e.key === 'Escape' && !loading) onClose() }
-    window.addEventListener('keydown', h)
-    return () => window.removeEventListener('keydown', h)
-  }, [onClose, loading])
-
-  const handleDeactivate = async () => {
-    setLoading(true)
-    try {
-      await internCourseService.delete(course.id)
-      toast.warning(
-        `"${course.name}" deactivated — still visible with Inactive status.`,
-        'Course Deactivated'
-      )
-      onDeactivated()
-      onClose()
-    } catch (err) {
-      toast.error(err?.message ?? 'Failed to deactivate course', 'Deactivate Failed')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  return (
-    <div ref={overlayRef}
-      onClick={(e) => { if (e.target === overlayRef.current && !loading) onClose() }}
-      className="fixed inset-0 z-50 flex items-center justify-center"
-      style={{ backgroundColor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(3px)' }}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full flex flex-col items-center p-8 text-center"
-        style={{ maxWidth: 420, margin: '0 16px' }}>
-        <div className="w-14 h-14 rounded-2xl flex items-center justify-center mb-4"
-          style={{ backgroundColor: '#FEF9C3' }}>
-          <Trash2 size={24} color="#854D0E" />
-        </div>
-        <h2 className="text-lg font-bold text-gray-900 mb-1">Deactivate Course</h2>
-        <p className="text-sm text-gray-500 mb-2 leading-relaxed">
-          Are you sure you want to deactivate{' '}
-          <span className="font-semibold text-gray-800">"{course.name}"</span>?
-        </p>
-        <div className="text-xs text-gray-500 mb-6 bg-amber-50 border border-amber-100 rounded-lg px-4 py-2.5 w-full text-left leading-relaxed">
-          <strong>💡 Soft Delete:</strong> The record stays in the database and will still
-          appear in this list with an <strong>Inactive</strong> status badge.
-          Re-activate anytime via <strong>Edit → Status → Active</strong>.
-        </div>
-        <div className="flex gap-3 w-full">
-          <button onClick={onClose} disabled={loading}
-            className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-50">
-            Cancel
-          </button>
-          <button onClick={handleDeactivate} disabled={loading}
-            className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white transition-colors disabled:opacity-60 flex items-center justify-center gap-2"
-            style={{ backgroundColor: '#D97706' }}
-            onMouseEnter={(e) => !loading && (e.currentTarget.style.backgroundColor = '#B45309')}
-            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = '#D97706')}>
-            {loading && (
-              <svg className="animate-spin w-3.5 h-3.5" viewBox="0 0 24 24" fill="none">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-              </svg>
-            )}
-            Deactivate
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
 // ─── Skeleton ─────────────────────────────────────────────────────────────────
 function TableSkeleton() {
   return Array.from({ length: 6 }).map((_, i) => (
@@ -418,7 +304,7 @@ function TableSkeleton() {
   ))
 }
 
-// ─── Stat Card
+// ─── Stat Card ────────────────────────────────────────────────────────────────
 function StatCard({ label, value, color, bg, loading }) {
   return (
     <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 flex items-center gap-3">
@@ -435,7 +321,7 @@ function StatCard({ label, value, color, bg, loading }) {
   )
 }
 
-// ─── Pagination 
+// ─── Pagination ───────────────────────────────────────────────────────────────
 function Pagination({ current, totalElements, pageSize, totalPages, onChange }) {
   if (totalPages <= 1) return null
   const startItem = current * pageSize + 1
@@ -478,6 +364,10 @@ function Pagination({ current, totalElements, pageSize, totalPages, onChange }) 
 export default function InternCourseManagement() {
   const { toast } = useToast()
 
+  // ── Role check ────────────────────────────────────────────────────────────
+  const user      = useAuthStore((state) => state.user)
+  const canDelete = user?.role === ROLES.ADMIN
+
   // ── Server data ───────────────────────────────────────────────────────────
   const [courses,       setCourses]       = useState([])
   const [totalElements, setTotalElements] = useState(0)
@@ -488,24 +378,31 @@ export default function InternCourseManagement() {
   const [stats,        setStats]        = useState({ total: 0, active: 0, inactive: 0 })
   const [statsLoading, setStatsLoading] = useState(false)
 
-  // ── Pagination (0-indexed Spring) ─────────────────────────────────────────
+  // ── Pagination ────────────────────────────────────────────────────────────
   const [page, setPage] = useState(0)
 
-  // ── Filters (client-side) ─────────────────────────────────────────────────
-  const [search,       setSearch]       = useState('')
-  const [statusFilter, setStatusFilter] = useState('All')   // 'All' | 'Active' | 'Inactive'
+  // ── Search (client-side) ──────────────────────────────────────────────────
+  const [search, setSearch] = useState('')
+
+  // ── Filter modal ──────────────────────────────────────────────────────────
+  const [showFilter,    setShowFilter]    = useState(false)
+  const [activeFilters, setActiveFilters] = useState({})   // { status: ['Active'] }
+
+  const filterCount = Object.values(activeFilters).filter((v) =>
+    Array.isArray(v) ? v.length > 0 : !!v
+  ).length
 
   // ── Modal state ───────────────────────────────────────────────────────────
-  const [modalMode,      setModalMode]      = useState(null)  // 'add' | 'edit'
-  const [editTarget,     setEditTarget]     = useState(null)
-  const [deactivateTarget, setDeactivateTarget] = useState(null)
+  const [modalMode,    setModalMode]    = useState(null)   // 'add' | 'edit'
+  const [editTarget,   setEditTarget]   = useState(null)
+  const [deleteTarget, setDeleteTarget] = useState(null)
+  const [deleting,     setDeleting]     = useState(false)
 
-  // ─── Fetch list ──────────────────────────────────────────────────────────
+  // ── Fetch list ────────────────────────────────────────────────────────────
   const fetchCourses = useCallback(async (currentPage) => {
     setTableLoading(true)
     try {
       const res      = await internCourseService.getAll(currentPage, PAGE_SIZE)
-      // apiClient interceptor unwraps ApiResponse → res = { success, message, data: PageResponseDTO }
       const pageData = res?.data ?? {}
       setCourses(pageData.content       ?? [])
       setTotalElements(pageData.totalElements ?? 0)
@@ -518,7 +415,7 @@ export default function InternCourseManagement() {
     }
   }, [toast])
 
-  // ─── Fetch stats ─────────────────────────────────────────────────────────
+  // ── Fetch stats ───────────────────────────────────────────────────────────
   const fetchStats = useCallback(async () => {
     setStatsLoading(true)
     try {
@@ -529,21 +426,50 @@ export default function InternCourseManagement() {
     }
   }, [])
 
-  // ─── Initial load ─────────────────────────────────────────────────────────
-  useEffect(() => {
-    fetchCourses(0)
-    fetchStats()
-  }, []) // eslint-disable-line
+  // ── Initial load ──────────────────────────────────────────────────────────
+  useEffect(() => { fetchCourses(0); fetchStats() }, []) // eslint-disable-line
 
-  // ─── Page change ─────────────────────────────────────────────────────────
+  // ── Pagination ────────────────────────────────────────────────────────────
   const handlePageChange = (p) => { setPage(p); fetchCourses(p) }
 
-  // ─── After any mutation ───────────────────────────────────────────────────
-  const handleRefresh = () => { fetchCourses(page); fetchStats() }
+  // ── Refresh ───────────────────────────────────────────────────────────────
+  const handleRefresh = useCallback(() => {
+    fetchCourses(page); fetchStats()
+  }, [fetchCourses, fetchStats, page])
 
-  // ─── Client-side filter: search + status tab ──────────────────────────────
+  // ── Filter apply / reset ──────────────────────────────────────────────────
+  const handleApplyFilter = useCallback((filters) => {
+    setActiveFilters(filters)
+  }, [])
+
+  const handleResetFilter = useCallback(() => {
+    setActiveFilters({})
+  }, [])
+
+  // ── Soft delete ───────────────────────────────────────────────────────────
+  const handleConfirmDelete = async () => {
+    if (!deleteTarget) return
+    setDeleting(true)
+    try {
+      await internCourseService.delete(deleteTarget.id)
+      toast.success(`"${deleteTarget.name}" has been deleted`, 'Deleted')
+      setDeleteTarget(null)
+      const remainingOnPage = courses.length - 1
+      const targetPage = remainingOnPage === 0 && page > 0 ? page - 1 : page
+      setPage(targetPage)
+      fetchCourses(targetPage)
+      fetchStats()
+    } catch (err) {
+      toast.error(err?.message ?? 'Failed to delete course', 'Delete Failed')
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  // ── Client-side filter: search + status ──────────────────────────────────
   const filteredCourses = useMemo(() => {
     let list = courses
+
     if (search.trim()) {
       const q = search.toLowerCase()
       list = list.filter(
@@ -551,14 +477,21 @@ export default function InternCourseManagement() {
                (c.description ?? '').toLowerCase().includes(q)
       )
     }
-    if (statusFilter === 'Active')   list = list.filter((c) => c.active)
-    if (statusFilter === 'Inactive') list = list.filter((c) => !c.active)
+
+    const statusChips = activeFilters.status ?? []
+    if (statusChips.includes('Active') && !statusChips.includes('Inactive')) {
+      list = list.filter((c) => c.active)
+    } else if (statusChips.includes('Inactive') && !statusChips.includes('Active')) {
+      list = list.filter((c) => !c.active)
+    }
+    // if both or neither selected → show all
+
     return list
-  }, [courses, search, statusFilter])
+  }, [courses, search, activeFilters])
 
   return (
     <>
-      {/* ── Page Header ─────────────────────────────────────────── */}
+      {/* ── Page Header ───────────────────────────────────────── */}
       <div className="flex items-center justify-between mb-5 gap-3 flex-wrap">
         <div>
           <h1 className="text-xl font-bold text-gray-900 m-0">Intern Course Management</h1>
@@ -566,7 +499,7 @@ export default function InternCourseManagement() {
         </div>
         <div className="flex items-center gap-2">
           <button onClick={handleRefresh} disabled={tableLoading}
-            className="flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-medium border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-40"
+            className="w-9 h-9 flex items-center justify-center rounded-xl border border-gray-200 text-gray-500 hover:bg-gray-50 transition-colors disabled:opacity-40"
             title="Refresh">
             <RefreshCw size={14} className={tableLoading ? 'animate-spin' : ''} />
           </button>
@@ -580,18 +513,18 @@ export default function InternCourseManagement() {
         </div>
       </div>
 
-      {/* ── Stats Cards ─────────────────────────────────────────── */}
+      {/* ── Stats Cards ───────────────────────────────────────── */}
       <div className="grid grid-cols-3 gap-3 mb-5">
         <StatCard label="Total Courses"    value={stats.total}    color="#111827" bg="#F3F4F6" loading={statsLoading} />
         <StatCard label="Active Courses"   value={stats.active}   color="#15803D" bg="#DCFCE7" loading={statsLoading} />
         <StatCard label="Inactive Courses" value={stats.inactive} color="#B91C1C" bg="#FEE2E2" loading={statsLoading} />
       </div>
 
-      {/* ── Toolbar ─────────────────────────────────────────────── */}
+      {/* ── Toolbar ───────────────────────────────────────────── */}
       <div className="flex items-center gap-2 mb-4 flex-wrap">
         {/* Search */}
         <label className="flex items-center gap-2 bg-white rounded-xl px-3 h-10 border border-gray-200 cursor-text flex-1"
-          style={{ maxWidth: 360 }}>
+          style={{ maxWidth: 380 }}>
           <Search size={13} color="#9CA3AF" strokeWidth={2} className="flex-shrink-0" />
           <input type="text" value={search} onChange={(e) => setSearch(e.target.value)}
             placeholder="Search by name or description…"
@@ -606,13 +539,27 @@ export default function InternCourseManagement() {
           )}
         </label>
 
-        {/* Status Tabs — client-side filter */}
-        <div className="ml-auto">
-          <StatusTabs value={statusFilter} onChange={setStatusFilter} />
-        </div>
+        {/* Filter button */}
+        <button
+          onClick={() => setShowFilter(true)}
+          className="relative flex items-center gap-1.5 bg-white border rounded-lg px-3 h-10 text-[13px] font-medium cursor-pointer hover:bg-gray-50 ml-auto transition-colors"
+          style={{
+            borderColor: filterCount > 0 ? PRIMARY : '#E5E7EB',
+            color:       filterCount > 0 ? PRIMARY : '#374151',
+          }}>
+          <Filter size={13} strokeWidth={2} />
+          <span>Filter</span>
+          {filterCount > 0 && (
+            <span
+              className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full text-[9px] font-bold text-white flex items-center justify-center"
+              style={{ backgroundColor: PRIMARY }}>
+              {filterCount}
+            </span>
+          )}
+        </button>
       </div>
 
-      {/* ── Table ───────────────────────────────────────────────── */}
+      {/* ── Table ─────────────────────────────────────────────── */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full border-collapse" style={{ minWidth: 580 }}>
@@ -632,7 +579,7 @@ export default function InternCourseManagement() {
               ) : filteredCourses.length === 0 ? (
                 <tr>
                   <td colSpan={4} className="px-4 py-14 text-center text-sm text-gray-400">
-                    {search || statusFilter !== 'All'
+                    {search || filterCount > 0
                       ? 'No courses match your search or filter.'
                       : 'No courses found. Click "Add Intern Course" to create one.'}
                   </td>
@@ -679,9 +626,9 @@ export default function InternCourseManagement() {
                     {/* Action */}
                     <td className="px-5 py-4 border-b border-gray-50 text-center">
                       <ActionMenu
-                        isActive={row.active}
                         onEdit={() => { setEditTarget(row); setModalMode('edit') }}
-                        onDeactivate={() => setDeactivateTarget(row)}
+                        onDelete={() => setDeleteTarget(row)}
+                        canDelete={canDelete}
                       />
                     </td>
                   </tr>
@@ -702,7 +649,7 @@ export default function InternCourseManagement() {
         )}
       </div>
 
-      {/* ── Modals ──────────────────────────────────────────────── */}
+      {/* ── Course Add / Edit Modal ────────────────────────────── */}
       {(modalMode === 'add' || modalMode === 'edit') && (
         <CourseModal
           mode={modalMode}
@@ -712,13 +659,31 @@ export default function InternCourseManagement() {
         />
       )}
 
-      {deactivateTarget && (
-        <DeactivateModal
-          course={deactivateTarget}
-          onClose={() => setDeactivateTarget(null)}
-          onDeactivated={handleRefresh}
-        />
-      )}
+      {/* ── Delete Confirm (shared ConfirmModal, danger variant) ── */}
+      <ConfirmModal
+        isOpen={!!deleteTarget}
+        onClose={() => { if (!deleting) setDeleteTarget(null) }}
+        onConfirm={handleConfirmDelete}
+        title="Delete Course"
+        description={
+          deleteTarget
+            ? `Are you sure you want to delete "${deleteTarget.name}"? It will be permanently removed from the listing but retained in the database.`
+            : ''
+        }
+        confirmLabel="Delete"
+        cancelLabel="Cancel"
+        variant="danger"
+        loading={deleting}
+      />
+
+      {/* ── Filter Panel (shared FilterModal) ─────────────────── */}
+      <FilterModal
+        isOpen={showFilter}
+        onClose={() => setShowFilter(false)}
+        onApply={handleApplyFilter}
+        onReset={handleResetFilter}
+        config={FILTER_CONFIG}
+      />
     </>
   )
 }
