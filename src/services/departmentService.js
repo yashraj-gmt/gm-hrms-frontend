@@ -32,10 +32,15 @@ const departmentService = {
   /**
    * PATCH /api/departments/:id
    * @param {number} id
+   
    * @param {Object} payload - DepartmentRequestDTO (partial)
    */
   update: (id, payload) =>
     apiClient.patch(`/departments/${id}`, payload),
+
+  getByApplicableType(type, page = 0, size = 100) {
+    return this.getAll(page, size, [type])
+  },
 
   /**
    * DELETE /api/departments/:id

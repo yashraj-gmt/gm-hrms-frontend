@@ -1,16 +1,25 @@
 // src/pages/employee/AddEmployee.jsx
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Mail, Save, UserPlus } from 'lucide-react'
+import { Mail, Save, UserPlus, CheckCircle, XCircle, Loader } from 'lucide-react'
 import { useToast } from '@/components/shared/toast/ToastProvider'
 import employeeService from '@/services/employeeService'
-import SearchableSelect  from '@/components/shared/SearchableSelect'
-import departmentService from '@/services/departmentService'
-import designationService from '@/services/designationService'
-import branchService     from '@/services/branchService'
-import documentService   from '@/services/documentService'
+import apiClient from '@/services/apiClient'
+import shiftService from '@/services/shiftService'
+import SearchableSelect from '@/components/shared/SearchableSelect'
 
 const PRIMARY = '#C35E33'
+
+// ─── File-upload constraints ──────────────────────────────────────────────────
+const PROFILE_PHOTO_MAX_MB    = 5
+const PROFILE_PHOTO_MAX_BYTES = PROFILE_PHOTO_MAX_MB * 1024 * 1024
+const PROFILE_PHOTO_ALLOWED   = ['image/jpeg', 'image/png', 'image/gif', 'image/webp']
+const PROFILE_PHOTO_EXT_LIST  = 'JPG, PNG, GIF, WEBP'
+
+const DOC_MAX_MB    = 5
+const DOC_MAX_BYTES = DOC_MAX_MB * 1024 * 1024
+const DOC_ALLOWED   = ['application/pdf', 'image/jpeg', 'image/png']
+const DOC_EXT_LIST  = 'PDF, JPG, PNG'
 
 const EMPLOYMENT_TYPE_ROUTES = {
   Internship: '/employees/add-intern',
@@ -18,7 +27,7 @@ const EMPLOYMENT_TYPE_ROUTES = {
   Employee:   '/employees/add',
 }
 
-// ─── Validation helpers ───────────────────────────────────────────────────────
+// ─── Regex helpers ────────────────────────────────────────────────────────────
 const PHONE_RE = /^[6-9]\d{9}$/
 const EMAIL_RE = /^[A-Za-z0-9+_.-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/
 const PAN_RE   = /^[A-Z]{5}\d{4}[A-Z]$/
@@ -40,27 +49,17 @@ function validateEmail(value, fieldName) {
   return null
 }
 
-/**
- * Returns an object of field-key → error-message.
- * Empty object means the form is valid.
- * ALL fields are now required.
- *
- * FIX: Added `reasons` and `docTypes` parameters that were previously missing,
- * causing `docTypes.forEach` to throw when the Submit button was clicked.
- */
 function buildErrors(p, o, emp, addr, bank, docs, reasons, docTypes) {
   const errs = {}
 
-  // ── Personal ──────────────────────────────────────────────────────────────
-  if (!p.firstName.trim())   errs.firstName     = 'First name is required'
-  if (!p.middleName.trim())  errs.middleName    = 'Middle name is required'
-  if (!p.lastName.trim())    errs.lastName      = 'Last name is required'
-  if (!p.gender)             errs.gender        = 'Gender is required'
-  if (!p.dob)                errs.dob           = 'Date of birth is required'
-  if (!p.maritalStatus)      errs.maritalStatus = 'Marital status is required'
-  if (!p.spouseName.trim())  errs.spouseName    = 'Spouse / parent name is required'
-  // FIX: profile photo error now correctly surfaces because buildErrors no longer crashes
-  if (!p.profilePhoto)       errs.profilePhoto  = 'Profile photo is required'
+  if (!p.firstName.trim())  errs.firstName     = 'First name is required'
+  if (!p.middleName.trim()) errs.middleName    = 'Middle name is required'
+  if (!p.lastName.trim())   errs.lastName      = 'Last name is required'
+  if (!p.gender)            errs.gender        = 'Gender is required'
+  if (!p.dob)               errs.dob           = 'Date of birth is required'
+  if (!p.maritalStatus)     errs.maritalStatus = 'Marital status is required'
+  if (!p.spouseName.trim()) errs.spouseName    = 'Spouse / parent name is required'
+  if (!p.profilePhoto)      errs.profilePhoto  = 'Profile photo is required'
 
   const phoneErr = validatePhone(p.personalPhone, 'Personal phone')
   if (phoneErr) errs.personalPhone = phoneErr
@@ -71,22 +70,21 @@ function buildErrors(p, o, emp, addr, bank, docs, reasons, docTypes) {
   const emailErr = validateEmail(p.personalEmail, 'Personal email')
   if (emailErr) errs.personalEmail = emailErr
 
-  // ── Office ────────────────────────────────────────────────────────────────
-  if (!o.designation.trim())    errs.designation    = 'Designation is required'
-  if (!o.department.trim())     errs.department     = 'Department is required'
-  if (!o.officeEmail.trim())    errs.officeEmail    = 'Office email is required'
+if (!o.designationId)   errs.designation  = 'Designation is required'
+if (!o.departmentId)    errs.department   = 'Department is required'
+if (!o.workLocationId)  errs.workLocation = 'Work location / branch is required'
+if (!o.shiftId)         errs.shiftId      = 'Shift is required'
   else if (!EMAIL_RE.test(o.officeEmail)) errs.officeEmail = 'Office email is not valid'
-  if (!o.joiningDate)           errs.joiningDate    = 'Date of joining is required'
-  if (!o.workLocation.trim())   errs.workLocation   = 'Work location / branch is required'
+  if (!o.joiningDate)             errs.joiningDate      = 'Date of joining is required'
+  if (!o.workLocation.trim())     errs.workLocation     = 'Work location / branch is required'
   if (!o.reportingManager.trim()) errs.reportingManager = 'Reporting manager is required'
-  if (!o.role.trim())           errs.role           = 'Role is required'
+  if (!o.role.trim())             errs.role             = 'Role is required'
 
   if (o.experience === '' || o.experience === null || o.experience === undefined)
     errs.experience = 'Years of experience is required'
   else if (isNaN(o.experience) || Number(o.experience) < 0)
     errs.experience = 'Experience must be a non-negative number'
 
-  // ── Employment ────────────────────────────────────────────────────────────
   if (emp.salary.trim() === '')
     errs.salary = 'Salary / CTC is required'
   else if (isNaN(emp.salary) || Number(emp.salary) <= 0)
@@ -97,16 +95,14 @@ function buildErrors(p, o, emp, addr, bank, docs, reasons, docTypes) {
   else if (isNaN(emp.noticePeriod) || Number(emp.noticePeriod) < 0)
     errs.noticePeriod = 'Notice period must be a non-negative number'
 
-  // ── Current address ────────────────────────────────────────────────────────
   if (!addr.currentAddress.trim()) errs.currentAddress = 'Current address is required'
-  if (!addr.city.trim())           errs.city            = 'City is required'
-  if (!addr.district.trim())       errs.district        = 'District is required'
-  if (!addr.state.trim())          errs.state           = 'State is required'
-  if (!addr.pinCode.trim())        errs.pinCode         = 'PIN code is required'
+  if (!addr.city.trim())           errs.city           = 'City is required'
+  if (!addr.district.trim())       errs.district       = 'District is required'
+  if (!addr.state.trim())          errs.state          = 'State is required'
+  if (!addr.pinCode.trim())        errs.pinCode        = 'PIN code is required'
   else if (!/^\d{6}$/.test(addr.pinCode)) errs.pinCode = 'PIN code must be 6 digits'
-  if (!addr.country.trim())        errs.country         = 'Country is required'
+  if (!addr.country.trim())        errs.country        = 'Country is required'
 
-  // ── Permanent address (only if not same as current) ────────────────────────
   if (!addr.sameAsCurrent) {
     if (!addr.permAddress.trim())  errs.permAddress  = 'Permanent address is required'
     if (!addr.permCity.trim())     errs.permCity     = 'City is required'
@@ -117,7 +113,6 @@ function buildErrors(p, o, emp, addr, bank, docs, reasons, docTypes) {
     if (!addr.permCountry.trim())  errs.permCountry  = 'Country is required'
   }
 
-  // ── Bank & Legal ───────────────────────────────────────────────────────────
   if (!bank.bankName.trim())      errs.bankName      = 'Bank name is required'
   if (!bank.accountNumber.trim()) errs.accountNumber = 'Account number is required'
   if (!bank.ifscCode.trim())      errs.ifscCode      = 'IFSC code is required'
@@ -127,15 +122,12 @@ function buildErrors(p, o, emp, addr, bank, docs, reasons, docTypes) {
   if (!bank.aadhaarNumber.trim()) errs.aadhaarNumber = 'Aadhaar number is required'
   else if (!ADHAR_RE.test(bank.aadhaarNumber.replace(/\s/g, ''))) errs.aadhaarNumber = 'Aadhaar must be exactly 12 digits'
 
-  // ── Documents ──────────────────────────────────────────────────────────────
-  // FIX: `docTypes` is now correctly passed in — previously undefined here,
-  // which caused .forEach to throw and silently prevented the modal from opening.
-  if (Array.isArray(docTypes)) {
-    docTypes.forEach(dt => {
-      if (dt.mandatory) {
-        const key     = dt.docKey || String(dt.id)
-        const hasFile   = docs[key] instanceof File
-        const hasReason = reasons?.[key]?.trim()
+ if (Array.isArray(docTypes)) {
+  docTypes.forEach(dt => {
+    if (dt.mandatory) {
+      const key       = dt.key || dt.docKey || String(dt.id)
+      const hasFile   = docs[key] instanceof File
+      const hasReason = reasons?.[key]?.trim()
         if (!hasFile && !hasReason)
           errs[`doc_${key}`] = `${dt.name} is required (upload file or provide reason)`
       }
@@ -145,7 +137,7 @@ function buildErrors(p, o, emp, addr, bank, docs, reasons, docTypes) {
   return errs
 }
 
-// ─── Reusable form components ─────────────────────────────────────────────────
+// ─── Reusable UI components ───────────────────────────────────────────────────
 function FieldLabel({ children, required }) {
   return (
     <label className="block text-xs font-medium text-gray-500 mb-1">
@@ -184,6 +176,7 @@ function TextInput({ placeholder, type = 'text', value, onChange, error, classNa
   )
 }
 
+// FIX: Removed live uniqueness badge — email checks now happen only on save/submit
 function SelectInput({ children, value, onChange, error }) {
   return (
     <>
@@ -244,25 +237,70 @@ function RadioOption({ name, value, checked, onChange, label }) {
   )
 }
 
-function FileUpload({ label, onChange, file, error, accept = '*' }) {
+function ProfilePhotoUpload({ file, onChange, error }) {
   const handleChange = (e) => {
-    if (e.target.files && e.target.files.length > 0) {
-      onChange(e.target.files[0])
-    }
+    const picked = e.target.files?.[0]
     e.target.value = ''
+    if (!picked) return
+    if (!PROFILE_PHOTO_ALLOWED.includes(picked.type)) {
+      onChange(null, `Invalid format. Allowed: ${PROFILE_PHOTO_EXT_LIST}`)
+      return
+    }
+    if (picked.size > PROFILE_PHOTO_MAX_BYTES) {
+      onChange(null, `File too large. Max size is ${PROFILE_PHOTO_MAX_MB} MB`)
+      return
+    }
+    onChange(picked, null)
   }
-
   return (
-    <>
+    <div>
       <label className="relative cursor-pointer">
         <div className={`flex items-center h-9 px-3 bg-gray-50 border rounded-lg hover:bg-gray-100 transition-colors ${
           error ? 'border-red-400' : 'border-gray-200'
         }`}>
           <span className="text-sm text-gray-400 flex-1 truncate">
-            {file ? file.name : 'Choose File'}
+            {file ? file.name : 'Choose Photo'}
           </span>
-          <div className="w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 ml-2" style={{ backgroundColor: PRIMARY }}>
+          <div
+            className="w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 ml-2"
+            style={{ backgroundColor: PRIMARY }}
+          >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+              <polyline points="17 8 12 3 7 8"/>
+              <line x1="12" y1="3" x2="12" y2="15"/>
+            </svg>
+          </div>
+        </div>
+        <input type="file" className="hidden" accept={PROFILE_PHOTO_ALLOWED.join(',')} onChange={handleChange} />
+      </label>
+      <p className="text-[10px] text-gray-400 mt-0.5 leading-relaxed">
+        Formats: {PROFILE_PHOTO_EXT_LIST} · Max {PROFILE_PHOTO_MAX_MB} MB
+        {!file && ' · Required for submission (optional for draft)'}
+      </p>
+      <ErrorMsg msg={error} />
+    </div>
+  )
+}
+
+function FileUpload({ onChange, file, error, accept = '*' }) {
+  const handleChange = (e) => {
+    if (e.target.files?.length > 0) onChange(e.target.files[0])
+    e.target.value = ''
+  }
+  return (
+    <>
+      <label className="relative cursor-pointer">
+        <div className={`flex items-center h-9 px-3 bg-gray-50 border rounded-lg
+          hover:bg-gray-100 transition-colors
+          ${error ? 'border-red-400' : 'border-gray-200'}`}>
+          <span className="text-sm text-gray-400 flex-1 truncate">
+            {file instanceof File ? file.name : 'Choose File'}
+          </span>
+          <div className="w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 ml-2"
+            style={{ backgroundColor: PRIMARY }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white"
+              strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
               <polyline points="17 8 12 3 7 8"/>
               <line x1="12" y1="3" x2="12" y2="15"/>
@@ -271,7 +309,6 @@ function FileUpload({ label, onChange, file, error, accept = '*' }) {
         </div>
         <input type="file" className="hidden" accept={accept} onChange={handleChange} />
       </label>
-      <ErrorMsg msg={error} />
     </>
   )
 }
@@ -285,7 +322,6 @@ function SectionCard({ title, children, className = '' }) {
   )
 }
 
-// ─── Email Confirmation Modal ─────────────────────────────────────────────────
 function EmailConfirmModal({ isOpen, onClose, onConfirm, loading, employeeName, email }) {
   if (!isOpen) return null
   return (
@@ -312,7 +348,6 @@ function EmailConfirmModal({ isOpen, onClose, onConfirm, loading, employeeName, 
             </svg>
           </button>
         </div>
-
         <div className="px-6 py-6 flex flex-col items-center text-center gap-4">
           <div className="w-14 h-14 rounded-2xl flex items-center justify-center bg-blue-50">
             <Mail size={28} color="#1E40AF" />
@@ -326,7 +361,6 @@ function EmailConfirmModal({ isOpen, onClose, onConfirm, loading, employeeName, 
             </p>
           </div>
         </div>
-
         <div className="px-6 pb-6 flex gap-3">
           <button
             onClick={onClose}
@@ -358,7 +392,7 @@ function EmailConfirmModal({ isOpen, onClose, onConfirm, loading, employeeName, 
 
 const STATUS_TO_API = { Active: 'ACTIVE', Inactive: 'INACTIVE', 'On Hold': 'ON_HOLD' }
 
-// ─── Main Page ─────────────────────────────────────────────────────────────────
+// ─── Main Page ────────────────────────────────────────────────────────────────
 export default function AddEmployee() {
   const navigate  = useNavigate()
   const { toast } = useToast()
@@ -366,6 +400,8 @@ export default function AddEmployee() {
   const [errors,      setErrors]      = useState({})
   const [submitting,  setSubmitting]  = useState(false)
   const [showConfirm, setShowConfirm] = useState(false)
+
+  // Dropdown data
   const [departments,   setDepartments]   = useState([])
   const [designations,  setDesignations]  = useState([])
   const [branches,      setBranches]      = useState([])
@@ -373,62 +409,104 @@ export default function AddEmployee() {
   const [desigLoading,  setDesigLoading]  = useState(true)
   const [branchLoading, setBranchLoading] = useState(true)
 
-  // Fetch dropdown options + applicable document types on mount
+  // Document types
+  const [docTypes,   setDocTypes]   = useState([])
+  const [docLoading, setDocLoading] = useState(true)
+
+  const [shifts,       setShifts]       = useState([])
+const [shiftLoading, setShiftLoading] = useState(true)
+
   useEffect(() => {
     const load = async () => {
-      const [deptRes, desigRes, branchRes, docRes] = await Promise.allSettled([
-        departmentService.getAll({ page: 0, size: 200 }),
-        designationService.getAll(0, 200),
-        branchService.getTree(),
-        documentService.getByApplicableType('EMPLOYEE', 0, 100),
-      ])
+      try {
+const [deptRes, desigRes, branchRes, docRes, shiftRes] = await Promise.allSettled([
+  apiClient.get('/departments',    { params: { page: 0, size: 200 } }),
+  apiClient.get('/designations',   { params: { page: 0, size: 200 } }),
+  apiClient.get('/branches/tree'),
+  apiClient.get('/document-types', { params: { applicableType: 'EMPLOYEE', page: 0, size: 100 } }),
+  shiftService.getAll(0, 200),   // ← use existing service
+])
+        if (deptRes.status === 'fulfilled') {
+          const d = deptRes.value?.data?.data ?? deptRes.value?.data ?? {}
+          setDepartments((d.content ?? []).filter(x => x.status !== false))
+        } else {
+          console.error('Failed to load departments:', deptRes.reason)
+        }
 
-      if (deptRes.status === 'fulfilled') {
-        const d = deptRes.value?.data?.data ?? deptRes.value?.data ?? {}
-        setDepartments((d.content ?? []).filter(x => x.status !== false))
-      }
-      if (desigRes.status === 'fulfilled') {
-        const d = desigRes.value?.data?.data ?? desigRes.value?.data ?? {}
-        setDesignations((d.content ?? []).filter(x => x.active !== false))
-      }
-      if (branchRes.status === 'fulfilled') {
-        const d = branchRes.value?.data?.data ?? branchRes.value?.data ?? []
-        const flatten = (nodes) => nodes.flatMap(n => [n, ...(n.children ? flatten(n.children) : [])])
-        setBranches(flatten(Array.isArray(d) ? d : [d]).filter(x => x.active !== false))
-      }
-      if (docRes.status === 'fulfilled') {
-        const d = docRes.value?.data?.data ?? docRes.value?.data ?? {}
-        setDocTypes((d.content ?? []).filter(x => x.active !== false))
-      }
+        if (desigRes.status === 'fulfilled') {
+          const d = desigRes.value?.data?.data ?? desigRes.value?.data ?? {}
+          setDesignations((d.content ?? []).filter(x => x.active !== false))
+        } else {
+          console.error('Failed to load designations:', desigRes.reason)
+        }
 
-      setDeptLoading(false); setDesigLoading(false)
-      setBranchLoading(false); setDocLoading(false)
+        if (branchRes.status === 'fulfilled') {
+          const d = branchRes.value?.data?.data ?? branchRes.value?.data ?? []
+          // FIX: Flatten tree structure (same as original AddEmployee had)
+          const flatten = (nodes) =>
+            nodes.flatMap(n => [n, ...(n.children ? flatten(n.children) : [])])
+          setBranches(flatten(Array.isArray(d) ? d : [d]).filter(x => x.active !== false))
+        } else {
+          console.error('Failed to load branches:', branchRes.reason)
+        }
+
+        if (shiftRes.status === 'fulfilled') {
+  const d = shiftRes.value?.data?.data ?? shiftRes.value?.data ?? {}
+  setShifts((d.content ?? []).filter(x => x.isActive !== false))
+} else {
+  console.error('Failed to load shifts:', shiftRes.reason)
+}
+
+        if (docRes.status === 'fulfilled') {
+          const d = docRes.value?.data?.data ?? docRes.value?.data ?? {}
+          
+          const rawDocs = (d.content ?? []).filter(x => x.active !== false)
+          const seen    = new Set()
+          const unique  = rawDocs.filter(dt => {
+            const key = dt.key || dt.docKey || String(dt.id)
+            if (seen.has(key)) return false
+            seen.add(key)
+            return true
+          })
+          setDocTypes(unique)
+        } else {
+          console.error('Failed to load document types:', docRes.reason)
+        }
+      } finally {
+        setDeptLoading(false)
+        setDesigLoading(false)
+        setBranchLoading(false)
+        setDocLoading(false)
+         setShiftLoading(false)
+      }
     }
     load()
   }, [])
 
-  // ── Personal Info ──────────────────────────────────────────────────────────
+  // ── Form state ─────────────────────────────────────────────────────────────
   const [personal, setPersonal] = useState({
     firstName: '', middleName: '', lastName: '', gender: '',
     dob: '', personalPhone: '', emergencyPhone: '', personalEmail: '',
     maritalStatus: '', spouseName: '', profilePhoto: null,
   })
 
-  // ── Office Info ────────────────────────────────────────────────────────────
-  const [office, setOffice] = useState({
-    employeeId: '', designation: '', department: '',
-    officeEmail: '', joiningDate: '', experience: '',
-    prevCompanyNames: [''],
-    workLocation: '', shiftId: '', reportingManager: '', role: '',
-  })
+const [office, setOffice] = useState({
+  employeeId: '',
+  designation: '', designationId: null,
+  department: '',  departmentId: null,
+  officeEmail: '', joiningDate: '', experience: '',
+  prevCompanyNames: [''],
+  workLocation: '', workLocationId: null,
+  shiftId: null,       // ← already exists, keep as null
+  shiftName: '',       // ← add for display
+  reportingManager: '', role: '',
+})
 
-  // ── Employment Details ─────────────────────────────────────────────────────
   const [empDetails, setEmpDetails] = useState({
     salary: '', status: 'Active',
     workMode: 'Remote', workingMode: 'Full-time', noticePeriod: '',
   })
 
-  // ── Address ────────────────────────────────────────────────────────────────
   const [address, setAddress] = useState({
     currentAddress: '', city: '', district: '', landmark: '',
     state: '', pinCode: '', country: 'India',
@@ -437,18 +515,53 @@ export default function AddEmployee() {
     permState: '', permPinCode: '', permCountry: 'India',
   })
 
-  // ── Bank & Legal ───────────────────────────────────────────────────────────
   const [bank, setBank] = useState({
     bankName: '', accountNumber: '', ifscCode: '',
     panNumber: '', aadhaarNumber: '', pfNumber: '',
     uanNumber: '', esicNumber: '',
   })
 
-  // ── Documents ──────────────────────────────────────────────────────────────
-  const [docTypes,    setDocTypes]    = useState([])
-  const [docLoading,  setDocLoading]  = useState(true)
-  const [documents,   setDocuments]   = useState({})   // { [docKey]: File }
-  const [docReasons,  setDocReasons]  = useState({})   // { [docKey]: string }
+  const [documents,  setDocuments]  = useState({})
+  const [docReasons, setDocReasons] = useState({})
+
+  // ── FIX 2: Email/code uniqueness — check on save/submit, NOT while typing ──
+  // Removed all debounced useEffect email checkers.
+  // Instead, checkEmailsAvailable() is called inside handleSaveDraft and
+  // handleSubmitClick before proceeding.
+
+  const checkEmailsAvailable = async () => {
+    const issues = []
+    try {
+      if (personal.personalEmail && EMAIL_RE.test(personal.personalEmail)) {
+        const r = await apiClient.get('/users/check-email', {
+          params: { email: personal.personalEmail.trim(), type: 'PERSONAL' }
+        })
+        // if (!r.data?.data?.available) {
+        //   issues.push({ field: 'personalEmail', msg: 'Personal email is already registered' })
+        // }
+      }
+      if (office.officeEmail && EMAIL_RE.test(office.officeEmail)) {
+        const r = await apiClient.get('/users/check-email', {
+          params: { email: office.officeEmail.trim(), type: 'OFFICE' }
+        })
+        // if (!r.data?.data?.available) {
+        //   issues.push({ field: 'officeEmail', msg: 'Office email is already registered' })
+        // }
+      }
+      if (office.employeeId.trim()) {
+  const r = await apiClient.get('/users/check-employee-code', {
+    params: { code: office.employeeId.trim() }
+  })
+  const available = r.data?.data?.available ?? r.data?.available ?? true
+  if (!available) {
+    issues.push({ field: 'employeeId', msg: 'Employee ID is already in use' })
+  }
+}
+    } catch {
+      // Network failure — don't block the user; backend will catch duplicates
+    }
+    return issues
+  }
 
   // ── Helpers ────────────────────────────────────────────────────────────────
   const updateField = (setter) => (field) => (e) =>
@@ -462,37 +575,28 @@ export default function AddEmployee() {
 
   const clearError  = (key) => setErrors((prev) => { const n = { ...prev }; delete n[key]; return n })
   const clearErrors = (...keys) => setErrors((prev) => {
-    const n = { ...prev }
-    keys.forEach((k) => delete n[k])
-    return n
+    const n = { ...prev }; keys.forEach((k) => delete n[k]); return n
   })
 
-  // ── "Same as current" address copy ────────────────────────────────────────
   const handleSameAsCurrent = (checked) => {
     setAddress((prev) => ({
-      ...prev,
-      sameAsCurrent: checked,
+      ...prev, sameAsCurrent: checked,
       ...(checked ? {
-        permAddress:  prev.currentAddress,
-        permCity:     prev.city,
-        permDistrict: prev.district,
-        permLandmark: prev.landmark,
-        permState:    prev.state,
-        permPinCode:  prev.pinCode,
-        permCountry:  prev.country,
+        permAddress: prev.currentAddress, permCity: prev.city,
+        permDistrict: prev.district,      permLandmark: prev.landmark,
+        permState: prev.state,            permPinCode: prev.pinCode,
+        permCountry: prev.country,
       } : {}),
     }))
     if (checked) clearErrors('permAddress','permCity','permDistrict','permState','permPinCode','permCountry')
   }
 
-  // ── Previous company names ─────────────────────────────────────────────────
   const addPrevCompany = () =>
     setOffice((prev) => ({ ...prev, prevCompanyNames: [...prev.prevCompanyNames, ''] }))
 
   const updatePrevCompany = (idx, val) =>
     setOffice((prev) => ({
-      ...prev,
-      prevCompanyNames: prev.prevCompanyNames.map((v, i) => (i === idx ? val : v)),
+      ...prev, prevCompanyNames: prev.prevCompanyNames.map((v, i) => (i === idx ? val : v)),
     }))
 
   // ── Build FormData ─────────────────────────────────────────────────────────
@@ -512,15 +616,16 @@ export default function AddEmployee() {
       personalEmail:      personal.personalEmail.trim() || null,
       officeEmail:        office.officeEmail.trim()     || null,
       workProfile: {
-        designationName:    office.designation.trim()      || null,
-        departmentName:     office.department.trim()       || null,
-        branchName:         office.workLocation.trim()     || null,
-        shiftId:            office.shiftId                 || null,
-        reportingManagerId: office.reportingManager.trim() || null,
-        workMode:           empDetails.workMode === 'On site' ? 'ONSITE' : empDetails.workMode.toUpperCase(),
-        workingType:        empDetails.workingMode.toUpperCase().replace(/[\s-]+/g, '_'),
-        status:             STATUS_TO_API[empDetails.status] || 'ACTIVE',
-      },
+  departmentId:       office.departmentId    || null,   // ← was departmentName
+  designationId:      office.designationId   || null,   // ← was designationName
+  branchId:           office.workLocationId  || null,   // ← was branchName
+  shiftId:            office.shiftId         || null,
+  reportingManagerId: office.reportingManager.trim() || null,
+  workMode:     empDetails.workMode === 'On site' ? 'ONSITE' : empDetails.workMode.toUpperCase(),
+  workingType:  empDetails.workingMode.toUpperCase().replace(/[\s-]+/g, '_'),
+  status:       STATUS_TO_API[empDetails.status] || 'ACTIVE',
+  dateOfJoining: office.joiningDate || null,        
+},
       address: {
         currentAddress: {
           addressLine: address.currentAddress.trim(),
@@ -531,7 +636,7 @@ export default function AddEmployee() {
           pinCode:     address.pinCode.trim(),
           country:     address.country.trim(),
         },
-        sameAsCurrent: address.sameAsCurrent,
+        sameAsCurrent:    address.sameAsCurrent,
         permanentAddress: address.sameAsCurrent ? null : {
           addressLine: address.permAddress.trim(),
           city:        address.permCity.trim(),
@@ -558,15 +663,13 @@ export default function AddEmployee() {
       role:         'EMPLOYEE',
       employeeCode: office.employeeId.trim() || null,
       employment: {
-        dateOfJoining:       office.joiningDate  || null,
-        yearOfExperience:    office.experience !== '' ? Number(office.experience) : null,
-        ctc:                 empDetails.salary  !== '' ? Number(empDetails.salary) : null,
+        dateOfJoining:        office.joiningDate  || null,
+        yearOfExperience:     office.experience !== '' ? Number(office.experience) : null,
+        ctc:                  empDetails.salary  !== '' ? Number(empDetails.salary) : null,
         previousCompanyNames: office.prevCompanyNames.filter(Boolean),
-        noticePeriod:        empDetails.noticePeriod !== '' ? Number(empDetails.noticePeriod) : null,
+        noticePeriod:         empDetails.noticePeriod !== '' ? Number(empDetails.noticePeriod) : null,
       },
     }
-
-    // createthe dat fro m data base inclyde 
 
     const fd = new FormData()
     fd.append('personalInformation', JSON.stringify(personalInfo))
@@ -574,29 +677,46 @@ export default function AddEmployee() {
 
     if (personal.profilePhoto instanceof File) fd.append('profileImage', personal.profilePhoto)
 
-    // Dynamic document files
     Object.entries(documents).forEach(([docKey, file]) => {
       if (file instanceof File) fd.append(docKey, file)
     })
-    // Reasons for missing docs
-    Object.entries(docReasons).forEach(([docKey, reason]) => {
-      if (reason?.trim() && !(documents[docKey] instanceof File)) {
-        fd.append(docKey, reason.trim())
-      }
-    })
+   const reasonsMap = {}
+Object.entries(docReasons).forEach(([docKey, reason]) => {
+  if (reason?.trim() && !(documents[docKey] instanceof File)) {
+    reasonsMap[docKey] = reason.trim()
+  }
+})
+if (Object.keys(reasonsMap).length > 0) {
+  fd.append('reasons', JSON.stringify(reasonsMap))
+}
     return fd
   }, [personal, office, empDetails, address, bank, documents, docReasons])
 
   // ── Save as Draft ──────────────────────────────────────────────────────────
   const handleSaveDraft = async () => {
-    if (!personal.firstName.trim() || !personal.lastName.trim()) {
-      setErrors({ firstName: !personal.firstName.trim() ? 'First name is required' : undefined,
-                  lastName:  !personal.lastName.trim()  ? 'Last name is required'  : undefined })
+    const draftErrs = {}
+    if (!personal.firstName.trim()) draftErrs.firstName = 'First name is required'
+    if (!personal.lastName.trim())  draftErrs.lastName  = 'Last name is required'
+
+    if (Object.keys(draftErrs).length > 0) {
+      setErrors(draftErrs)
       toast.warning('Please provide at least first and last name for draft')
       return
     }
+
     setSubmitting(true)
     try {
+      // FIX: Check email/code availability HERE (on save), not while typing
+      const uniquenessIssues = await checkEmailsAvailable()
+      if (uniquenessIssues.length > 0) {
+        const newErrs = {}
+        uniquenessIssues.forEach(({ field, msg }) => { newErrs[field] = msg })
+        setErrors(newErrs)
+        toast.warning(uniquenessIssues[0].msg)
+        setSubmitting(false)
+        return
+      }
+
       const fd = buildPayload(true)
       await employeeService.create(fd)
       toast.success('Employee saved as draft successfully')
@@ -608,12 +728,8 @@ export default function AddEmployee() {
     }
   }
 
-  // ── Submit (shows confirmation modal first) ─────────────────────────────────
-  const handleSubmitClick = () => {
-     console.log('office.department:', office.department)   // ← add this temporarily
-  console.log('office.designation:', office.designation)
-  console.log('office.workLocation:', office.workLocation)
-      
+  // ── Submit (full validation → confirmation modal) ──────────────────────────
+  const handleSubmitClick = async () => {
     const errs = buildErrors(personal, office, empDetails, address, bank, documents, docReasons, docTypes)
     if (Object.keys(errs).length > 0) {
       setErrors(errs)
@@ -624,11 +740,27 @@ export default function AddEmployee() {
       }, 100)
       return
     }
+
+    // FIX: Check email/code availability HERE (on submit), not while typing
+    setSubmitting(true)
+    try {
+      const uniquenessIssues = await checkEmailsAvailable()
+      if (uniquenessIssues.length > 0) {
+        const newErrs = {}
+        uniquenessIssues.forEach(({ field, msg }) => { newErrs[field] = msg })
+        setErrors(newErrs)
+        toast.warning(uniquenessIssues[0].msg)
+        return
+      }
+    } finally {
+      setSubmitting(false)
+    }
+
     setErrors({})
     setShowConfirm(true)
   }
 
-  // ── Actual submit after confirmation ──────────────────────────────────────
+  // ── Confirmed submit ───────────────────────────────────────────────────────
   const handleConfirmedSubmit = async () => {
     setSubmitting(true)
     try {
@@ -649,7 +781,8 @@ export default function AddEmployee() {
   return (
     <>
       <div className="min-h-full pb-8">
-        {/* ── Page Header ─────────────────────────────────────────── */}
+
+        {/* ── Page Header ──────────────────────────────────────────────── */}
         <div className="flex items-start justify-between mb-5 flex-wrap gap-4">
           <h1 className="text-xl font-bold text-gray-900">Add Employee</h1>
           <div className="flex flex-col items-end gap-1.5">
@@ -669,7 +802,7 @@ export default function AddEmployee() {
 
         <div className="flex flex-col gap-5">
 
-          {/* ── Personal Information ─────────────────────────────── */}
+          {/* ── Personal Information ──────────────────────────────────── */}
           <SectionCard title="Personal Information">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
               <div data-error={!!errors.firstName}>
@@ -713,11 +846,16 @@ export default function AddEmployee() {
                 <PhoneInput value={personal.emergencyPhone} error={errors.emergencyPhone}
                   onChange={(e) => { up('emergencyPhone')(e); clearError('emergencyPhone') }} />
               </div>
+              {/* FIX: Removed live uniqueness check — plain email input now */}
               <div data-error={!!errors.personalEmail}>
                 <FieldLabel required>Personal Email</FieldLabel>
-                <TextInput type="email" placeholder="name@gmail.com" value={personal.personalEmail}
+                <TextInput
+                  type="email"
+                  placeholder="name@gmail.com"
+                  value={personal.personalEmail}
                   error={errors.personalEmail}
-                  onChange={(e) => { up('personalEmail')(e); clearError('personalEmail') }} />
+                  onChange={(e) => { up('personalEmail')(e); clearError('personalEmail') }}
+                />
               </div>
             </div>
 
@@ -727,7 +865,8 @@ export default function AddEmployee() {
                 <SelectInput value={personal.maritalStatus} error={errors.maritalStatus}
                   onChange={(e) => { up('maritalStatus')(e); clearError('maritalStatus') }}>
                   <option value="">Select Status</option>
-                  <option>Single</option><option>Married</option><option>Divorced</option><option>Widowed</option>
+                  <option>Single</option><option>Married</option>
+                  <option>Divorced</option><option>Widowed</option>
                 </SelectInput>
               </div>
               <div data-error={!!errors.spouseName}>
@@ -740,67 +879,91 @@ export default function AddEmployee() {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <div data-error={!!errors.profilePhoto}>
                 <FieldLabel required>Profile Photo</FieldLabel>
-                <FileUpload
+                <ProfilePhotoUpload
                   file={personal.profilePhoto}
-                  accept="image/*"
                   error={errors.profilePhoto}
-                  onChange={(f) => { setPersonal((p) => ({ ...p, profilePhoto: f })); clearError('profilePhoto') }}
+                  onChange={(file, validationError) => {
+                    if (validationError) {
+                      setErrors(e => ({ ...e, profilePhoto: validationError }))
+                      setPersonal(p => ({ ...p, profilePhoto: null }))
+                    } else {
+                      setPersonal(p => ({ ...p, profilePhoto: file }))
+                      clearError('profilePhoto')
+                    }
+                  }}
                 />
               </div>
             </div>
           </SectionCard>
 
-          {/* ── Office Information ────────────────────────────────── */}
+          {/* ── Office Information ────────────────────────────────────── */}
           <SectionCard title="Office Information">
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-3">
               <div>
                 <FieldLabel>Employee ID (auto-generated if blank)</FieldLabel>
-                <TextInput placeholder="GMEP001" value={office.employeeId} onChange={upo('employeeId')} />
+                <TextInput
+                  type="text"
+                  placeholder="GMEP001"
+                  value={office.employeeId}
+                  error={errors.employeeId}
+                  onChange={(e) => {
+                    setOffice(o => ({ ...o, employeeId: e.target.value }))
+                    clearError('employeeId')
+                  }}
+                />
               </div>
+
+              {/* FIX: Uses SearchableSelect with data from direct apiClient */}
               <div data-error={!!errors.designation}>
                 <FieldLabel required>Designation</FieldLabel>
                 <SearchableSelect
-  value={office.designation}
-  options={designations}
-  labelKey="name"
-  valueKey="name"
-  placeholder="Select designation…"
-  loading={desigLoading}
-  error={errors.designation}
-  onChange={opt => {
-    // opt may be full object OR just the string value — handle both
-    const name = opt?.name ?? (typeof opt === 'string' ? opt : '')
-    setOffice(o => ({ ...o, designation: name }))
-    clearError('designation')
-  }}
-/>
+                  value={office.designation}
+                  options={designations}
+                  labelKey="name"
+                  valueKey="name"
+                  placeholder={desigLoading ? 'Loading…' : 'Select designation…'}
+                  loading={desigLoading}
+                  onChange={opt => {
+  setOffice(o => ({ ...o, designation: opt?.name ?? '', designationId: opt?.id ?? null }))
+  clearError('designation')
+}}
+                />
               </div>
+
               <div data-error={!!errors.department}>
                 <FieldLabel required>Department</FieldLabel>
                 <SearchableSelect
-  value={office.department}
-  options={departments}
-  labelKey="name"
-  valueKey="name"
-  placeholder="Select department…"
-  loading={deptLoading}
-  error={errors.department}
-  onChange={opt => {
-    const name = opt?.name ?? (typeof opt === 'string' ? opt : '')
-    setOffice(o => ({ ...o, department: name }))
-    clearError('department')
-  }}
-/>
-
+                  value={office.department}
+                  options={departments}
+                  labelKey="name"
+                  valueKey="name"
+                  placeholder={deptLoading ? 'Loading…' : 'Select department…'}
+                  loading={deptLoading}
+                  error={errors.department}
+                  onChange={opt => {
+  setOffice(o => ({ ...o, department: opt?.name ?? '', departmentId: opt?.id ?? null }))
+  clearError('department')
+}}
+                />
               </div>
             </div>
 
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+              {/* FIX: Removed live uniqueness check — plain email input now */}
               <div data-error={!!errors.officeEmail}>
                 <FieldLabel required>Office Email</FieldLabel>
-                <TextInput type="email" placeholder="name@company.com" value={office.officeEmail} error={errors.officeEmail}
-                  onChange={(e) => { upo('officeEmail')(e); clearError('officeEmail') }} />
+                <TextInput
+                  type="email"
+                  placeholder="name@company.com"
+                  value={office.officeEmail}
+                  error={errors.officeEmail}
+                  onChange={(e) => {
+                    upo('officeEmail')(e)
+                    clearError('officeEmail')
+                  }}
+                />
               </div>
+
               <div data-error={!!errors.joiningDate}>
                 <FieldLabel required>Date of Joining</FieldLabel>
                 <TextInput type="date" value={office.joiningDate} error={errors.joiningDate}
@@ -814,20 +977,41 @@ export default function AddEmployee() {
               <div data-error={!!errors.workLocation}>
                 <FieldLabel required>Work Location / Branch</FieldLabel>
                 <SearchableSelect
-  value={office.workLocation}
-  options={branches}
-  labelKey="branchName"
-  valueKey="branchName"
-  placeholder="Select branch…"
-  loading={branchLoading}
-  error={errors.workLocation}
-  onChange={opt => {
-    const name = opt?.branchName ?? (typeof opt === 'string' ? opt : '')
-    setOffice(o => ({ ...o, workLocation: name }))
-    clearError('workLocation')
-  }}
-/>
+                  value={office.workLocation}
+                  options={branches}
+                  labelKey="branchName"
+                  valueKey="branchName"
+                  placeholder={branchLoading ? 'Loading…' : 'Select branch…'}
+                  loading={branchLoading}
+                  error={errors.workLocation}
+                 onChange={opt => {
+  setOffice(o => ({ ...o, workLocation: opt?.branchName ?? '', workLocationId: opt?.id ?? null }))
+  clearError('workLocation')
+}}
+                />
               </div>
+
+              {/* Add after Work Location / Branch div */}
+<div data-error={!!errors.shiftId}>
+  <FieldLabel required>Shift</FieldLabel>
+  <SearchableSelect
+    value={office.shiftName}
+    options={shifts}
+    labelKey="shiftName"
+    valueKey="id"
+    placeholder={shiftLoading ? 'Loading…' : 'Select shift…'}
+    loading={shiftLoading}
+    error={errors.shiftId}
+    onChange={opt => {
+      setOffice(o => ({
+        ...o,
+        shiftName: opt?.shiftName ?? '',
+        shiftId:   opt?.id        ?? null,
+      }))
+      clearError('shiftId')
+    }}
+  />
+</div>
             </div>
 
             <div className="mb-3">
@@ -868,7 +1052,7 @@ export default function AddEmployee() {
             </div>
           </SectionCard>
 
-          {/* ── Employment Details ────────────────────────────────── */}
+          {/* ── Employment Details ────────────────────────────────────── */}
           <SectionCard title="Employment Details">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               <div className="space-y-4">
@@ -887,7 +1071,6 @@ export default function AddEmployee() {
                   </div>
                 </div>
               </div>
-
               <div className="space-y-4">
                 <div>
                   <FieldLabel required>Employee Status</FieldLabel>
@@ -918,7 +1101,7 @@ export default function AddEmployee() {
             </div>
           </SectionCard>
 
-          {/* ── Current Address ───────────────────────────────────── */}
+          {/* ── Current Address ───────────────────────────────────────── */}
           <SectionCard title="Current Address">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
               <div data-error={!!errors.currentAddress}>
@@ -982,7 +1165,7 @@ export default function AddEmployee() {
             </div>
           </SectionCard>
 
-          {/* ── Permanent Address ─────────────────────────────────── */}
+          {/* ── Permanent Address ─────────────────────────────────────── */}
           <div className="rounded-xl border-2 p-5" style={{ borderColor: PRIMARY }}>
             <label className="flex items-start gap-2.5 cursor-pointer mb-5">
               <div className="relative mt-0.5 flex-shrink-0">
@@ -1065,7 +1248,7 @@ export default function AddEmployee() {
             </div>
           </div>
 
-          {/* ── Bank & Legal Details ──────────────────────────────── */}
+          {/* ── Bank & Legal Details ──────────────────────────────────── */}
           <SectionCard title="Bank & Legal Details">
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-3">
               <div data-error={!!errors.bankName}>
@@ -1113,76 +1296,106 @@ export default function AddEmployee() {
             </div>
           </SectionCard>
 
-          {/* ── Documents ─────────────────────────────────────────── */}
-          <SectionCard title="Documents">
-            {docLoading ? (
-              <div className="flex items-center gap-2 text-sm text-gray-400 py-2">
-                <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke={PRIMARY} strokeWidth="4"/>
-                  <path className="opacity-75" fill={PRIMARY} d="M4 12a8 8 0 018-8v8z"/>
-                </svg>
-                Loading required documents…
-              </div>
-            ) : docTypes.length === 0 ? (
-              <p className="text-sm text-gray-400 py-2">No documents required for this employment type.</p>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {docTypes.map((dt, idx) => {
-                  // FIX: Use a stable, unique key for each document type.
-                  // Fall back to index-based key if docKey is missing/falsy,
-                  // which previously caused all reason inputs to share the same
-                  // state slot (docReasons[undefined]) and mirror each other.
-                  const docKey = dt.docKey || String(dt.id || idx)
-                  const errKey = `doc_${docKey}`
-                  const file   = documents[docKey]
-                  const reason = docReasons[docKey] ?? ''
-                  return (
-                    <div key={docKey} className="flex flex-col gap-1.5">
-                      <FieldLabel required={dt.mandatory}>
-                        {dt.name}
-                        {dt.mandatory && (
-                          <span className="ml-1.5 text-[10px] font-normal text-gray-400">(mandatory)</span>
-                        )}
-                      </FieldLabel>
+         {/* ── Documents ── */}
+<SectionCard title="Documents">
+  {docLoading ? (
+    <div className="flex items-center gap-2 text-sm text-gray-400 py-2">
+      <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
+        <circle className="opacity-25" cx="12" cy="12" r="10" stroke={PRIMARY} strokeWidth="4"/>
+        <path className="opacity-75" fill={PRIMARY} d="M4 12a8 8 0 018-8v8z"/>
+      </svg>
+      Loading required documents…
+    </div>
+  ) : docTypes.length === 0 ? (
+    <p className="text-sm text-gray-400 py-2">No documents required for this employment type.</p>
+  ) : (
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      {docTypes.map((dt, idx) => {
+        const docKey = dt.key || dt.docKey || String(dt.id || idx)
+        const errKey = `doc_${docKey}`
+        const file   = documents[docKey]
+        const reason = docReasons[docKey] ?? ''
+        return (
+          <div key={docKey} className="flex flex-col gap-1.5">
+            <FieldLabel required={dt.mandatory}>
+              {dt.name}
+              {dt.mandatory && (
+                <span className="ml-1.5 text-[10px] font-normal text-gray-400">(mandatory)</span>
+              )}
+            </FieldLabel>
 
-                      {/* File upload */}
-                      <FileUpload
-                        file={file}
-                        accept=".pdf,.jpg,.jpeg,.png"
-                        error={errors[errKey]}
-                        onChange={f => {
-                          setDocuments(d => ({ ...d, [docKey]: f }))
-                          setDocReasons(d => ({ ...d, [docKey]: '' }))
-                          clearError(errKey)
-                        }}
-                      />
-
-                      {/* Reason field — shown only when no file selected.
-                          FIX: Each input is keyed to its own docKey so state
-                          is completely isolated per document. */}
-                      {!file && (
-                        <input
-                          key={`reason-${docKey}`}
-                          type="text"
-                          placeholder="Reason if document unavailable"
-                          value={reason}
-                          onChange={e => {
-                            setDocReasons(d => ({ ...d, [docKey]: e.target.value }))
-                            clearError(errKey)
-                          }}
-                          className={`w-full h-8 px-2.5 text-xs text-gray-600 bg-gray-50 border rounded-lg outline-none transition-colors
-                            ${errors[errKey] ? 'border-red-400' : 'border-gray-200 focus:border-[#C35E33]'}`}
-                        />
-                      )}
-                      <ErrorMsg msg={errors[errKey]} />
-                    </div>
-                  )
-                })}
+            {/* ── Inline file upload with type/size validation ── */}
+            <label className="relative cursor-pointer">
+              <div className={`flex items-center h-9 px-3 bg-gray-50 border rounded-lg
+                hover:bg-gray-100 transition-colors
+                ${errors[errKey] ? 'border-red-400' : 'border-gray-200'}`}>
+                <span className="text-sm text-gray-400 flex-1 truncate">
+                  {file instanceof File ? file.name : 'Choose File'}
+                </span>
+                <div className="w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 ml-2"
+                  style={{ backgroundColor: PRIMARY }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white"
+                    strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                    <polyline points="17 8 12 3 7 8"/>
+                    <line x1="12" y1="3" x2="12" y2="15"/>
+                  </svg>
+                </div>
               </div>
+              <input
+                type="file"
+                className="hidden"
+                accept=".pdf,.jpg,.jpeg,.png"
+                onChange={e => {
+                  const picked = e.target.files?.[0]
+                  e.target.value = ''
+                  if (!picked) return
+                  // Type validation
+                  if (!DOC_ALLOWED.includes(picked.type)) {
+                    setErrors(prev => ({ ...prev, [errKey]: `Invalid format. Allowed: ${DOC_EXT_LIST}` }))
+                    return
+                  }
+                  // Size validation
+                  if (picked.size > DOC_MAX_BYTES) {
+                    setErrors(prev => ({ ...prev, [errKey]: `File too large. Max ${DOC_MAX_MB} MB` }))
+                    return
+                  }
+                  setDocuments(d => ({ ...d, [docKey]: picked }))
+                  setDocReasons(d => ({ ...d, [docKey]: '' }))
+                  clearError(errKey)
+                }}
+              />
+            </label>
+
+            {/* Format hint */}
+            <p className="text-[10px] text-gray-400 -mt-0.5">{DOC_EXT_LIST} · Max {DOC_MAX_MB} MB</p>
+
+            {/* Reason input — only when no file uploaded */}
+            {!(file instanceof File) && (
+              <input
+                type="text"
+                placeholder="Reason if document unavailable"
+                value={reason}
+                onChange={e => {
+                  setDocReasons(d => ({ ...d, [docKey]: e.target.value }))
+                  clearError(errKey)
+                }}
+                className={`w-full h-8 px-2.5 text-xs text-gray-600 bg-gray-50 border rounded-lg
+                  outline-none transition-colors
+                  ${errors[errKey] ? 'border-red-400' : 'border-gray-200 focus:border-[#C35E33]'}`}
+              />
             )}
-          </SectionCard>
 
-          {/* ── Action Buttons ────────────────────────────────────── */}
+            {/* Single error message */}
+            <ErrorMsg msg={errors[errKey]} />
+          </div>
+        )
+      })}
+    </div>
+  )}
+</SectionCard>
+
+          {/* ── Action Buttons ────────────────────────────────────────── */}
           <div className="flex items-center justify-end gap-3 pt-2">
             <button type="button" onClick={() => navigate('/employees')}
               className="px-5 py-2.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
@@ -1216,7 +1429,12 @@ export default function AddEmployee() {
               onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#374151')}
               onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = '#111827')}
             >
-              <UserPlus size={15} />
+              {submitting ? (
+                <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                </svg>
+              ) : <UserPlus size={15} />}
               Add Employee
             </button>
           </div>

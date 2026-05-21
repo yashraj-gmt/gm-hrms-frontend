@@ -10,7 +10,7 @@ import apiClient        from '@/services/apiClient'
 
 const PRIMARY = '#C35E33'
 
-// ─── Tiny shared UI helpers ───────────────────────────────────────────────────
+// Tiny shared UI helpers
 function FieldLabel({ children, required }) {
   return (
     <label className="block text-xs font-medium text-gray-500 mb-1">
@@ -119,7 +119,7 @@ function SectionCard({ title, children, className = '' }) {
   )
 }
 
-// ─── Email confirm modal ──────────────────────────────────────────────────────
+// ─── Email confirm modal
 function EmailConfirmModal({ isOpen, onClose, onConfirm, loading, employeeName, email }) {
   if (!isOpen) return null
   return (
@@ -171,7 +171,12 @@ const API_TO_WMODE  = { REMOTE: 'Remote', HYBRID: 'Hybrid', ONSITE: 'On site' }
 const API_TO_WTYPE  = { FULL_TIME: 'Full-time', PART_TIME: 'Part-time', CONTRACTUAL: 'Contractual' }
 const API_TO_STATUS = { ACTIVE: 'Active', INACTIVE: 'Inactive', ON_HOLD: 'On Hold' }
 
-// ─── Main page ────────────────────────────────────────────────────────────────
+const DOC_MAX_MB    = 5
+const DOC_MAX_BYTES = DOC_MAX_MB * 1024 * 1024
+const DOC_ALLOWED   = ['application/pdf', 'image/jpeg', 'image/png']
+const DOC_EXT_LIST  = 'PDF, JPG, PNG'
+
+// ─── Main page 
 export default function EditEmployee() {
   const { id }    = useParams()
   const navigate  = useNavigate()
@@ -183,20 +188,20 @@ export default function EditEmployee() {
   const [showConfirm,  setShowConfirm]  = useState(false)
   const [errors,       setErrors]       = useState({})
 
-  // ── Dropdown options (fetched from API) ───────────────────────────────────
+  // Dropdown options (fetched from API) ───────────────────────────────────
   const [departments,  setDepartments]  = useState([])
   const [designations, setDesignations] = useState([])
   const [branches,     setBranches]     = useState([])
-  const [docTypes,     setDocTypes]     = useState([])   // dynamic document types
+  const [docTypes,     setDocTypes]     = useState([]) 
   const [deptLoading,  setDeptLoading]  = useState(true)
   const [desigLoading, setDesigLoading] = useState(true)
   const [branchLoading,setBranchLoading]= useState(true)
   const [docLoading,   setDocLoading]   = useState(true)
 
-  // ── Employee meta ─────────────────────────────────────────────────────────
+  // Employee meta
   const [personalInfoId, setPersonalInfoId] = useState(null)
 
-  // ── Form state (mirrors AddEmployee) ─────────────────────────────────────
+  // Form state (mirrors AddEmployee)
   const [personal, setPersonal] = useState({
     firstName: '', middleName: '', lastName: '', gender: '',
     dob: '', personalPhone: '', emergencyPhone: '', personalEmail: '',
@@ -256,9 +261,17 @@ export default function EditEmployee() {
           setBranches((d.content ?? d).filter(x => x.active !== false))
         }
         if (docRes.status === 'fulfilled') {
-          const d = docRes.value?.data?.data ?? docRes.value?.data ?? {}
-          setDocTypes(d.content ?? d ?? [])
-        }
+  const d = docRes.value?.data?.data ?? docRes.value?.data ?? {}
+  const rawDocs = (d.content ?? d ?? []).filter(x => x.active !== false)
+  const seen = new Set()
+  const unique = rawDocs.filter(dt => {
+    const key = dt.key || dt.docKey || String(dt.id)  // ← add dt.key
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+  setDocTypes(unique)
+}
       } finally {
         setDeptLoading(false); setDesigLoading(false)
         setBranchLoading(false); setDocLoading(false)
@@ -428,10 +441,15 @@ export default function EditEmployee() {
     Object.entries(documents).forEach(([docKey, file]) => {
       if (file instanceof File) fd.append(docKey, file)
     })
-    // Reasons for missing docs
-    Object.entries(docReasons).forEach(([docKey, reason]) => {
-      if (reason?.trim()) fd.append(docKey, reason.trim())
-    })
+const reasonsMap = {}
+Object.entries(docReasons).forEach(([docKey, reason]) => {
+  if (reason?.trim() && !(documents[docKey] instanceof File)) {
+    reasonsMap[docKey] = reason.trim()
+  }
+})
+if (Object.keys(reasonsMap).length > 0) {
+  fd.append('reasons', JSON.stringify(reasonsMap))
+}
 
     return fd
   }, [personal, office, empDetails, address, bank, documents, docReasons])
@@ -475,13 +493,15 @@ export default function EditEmployee() {
     if (!address.pinCode.trim())     errs.pinCode = 'PIN code is required'
 
     // Mandatory documents
-    docTypes.forEach(dt => {
-      if (dt.mandatory) {
-        const hasFile   = documents[dt.docKey] instanceof File
-        const hasReason = docReasons[dt.docKey]?.trim()
-        if (!hasFile && !hasReason) errs[`doc_${dt.docKey}`] = `${dt.name} is required`
-      }
-    })
+   docTypes.forEach(dt => {
+  if (dt.mandatory) {
+    const key       = dt.key || dt.docKey || String(dt.id)
+    const hasFile   = documents[key] instanceof File   // ← `documents` state
+    const hasReason = docReasons[key]?.trim()          // ← `docReasons` state
+    if (!hasFile && !hasReason)
+      errs[`doc_${key}`] = `${dt.name} is required (upload file or provide reason)`
+  }
+})
 
     if (Object.keys(errs).length > 0) {
       setErrors(errs)
@@ -934,59 +954,94 @@ export default function EditEmployee() {
             </div>
           </SectionCard>
 
-          {/* ── Documents — dynamic, filtered by EMPLOYEE type ── */}
-          <SectionCard title="Documents">
-            {docLoading ? (
-              <div className="flex items-center gap-2 text-sm text-gray-400 py-4">
-                <Loader2 size={16} className="animate-spin" color={PRIMARY} />
-                Loading required documents…
+        {/* Replace existing Documents section in EditEmployee with: */}
+<SectionCard title="Documents">
+  {docLoading ? (
+    <div className="flex items-center gap-2 text-sm text-gray-400 py-4">
+      <Loader2 size={16} className="animate-spin" color={PRIMARY} />
+      Loading required documents…
+    </div>
+  ) : docTypes.length === 0 ? (
+    <p className="text-sm text-gray-400 py-2">No documents required for this employment type.</p>
+  ) : (
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      {docTypes.map(dt => {
+        const docKey = dt.key || dt.docKey || String(dt.id)  // ← FIXED
+        const errKey = `doc_${docKey}`
+        const file   = documents[docKey]
+        const reason = docReasons[docKey] ?? ''
+        return (
+          <div key={docKey} className="flex flex-col gap-1.5">
+            <FieldLabel required={dt.mandatory}>
+              {dt.name}
+              {dt.mandatory && (
+                <span className="ml-1.5 text-[10px] font-normal text-gray-400">(mandatory)</span>
+              )}
+            </FieldLabel>
+
+            <label className="relative cursor-pointer">
+              <div className={`flex items-center h-9 px-3 bg-gray-50 border rounded-lg
+                hover:bg-gray-100 transition-colors
+                ${errors[errKey] ? 'border-red-400' : 'border-gray-200'}`}>
+                <span className="text-sm text-gray-400 flex-1 truncate">
+                  {file instanceof File ? file.name : (file ?? 'Choose File')}
+                </span>
+                <div className="w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 ml-2"
+                  style={{ backgroundColor: PRIMARY }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white"
+                    strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                    <polyline points="17 8 12 3 7 8"/>
+                    <line x1="12" y1="3" x2="12" y2="15"/>
+                  </svg>
+                </div>
               </div>
-            ) : docTypes.length === 0 ? (
-              <p className="text-sm text-gray-400 py-2">No documents required for this employment type.</p>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {docTypes.map(dt => {
-                  const errKey = `doc_${dt.docKey}`
-                  const file   = documents[dt.docKey]
-                  const reason = docReasons[dt.docKey] ?? ''
-                  return (
-                    <div key={dt.docKey} className="flex flex-col gap-1.5">
-                      <FieldLabel required={dt.mandatory}>
-                        {dt.name}
-                        {dt.mandatory && <span className="ml-1.5 text-[10px] font-normal text-gray-400">(mandatory)</span>}
-                      </FieldLabel>
-                      <FileUpload
-                        file={file}
-                        accept=".pdf,.jpg,.jpeg,.png"
-                        error={errors[errKey]}
-                        onChange={f => {
-                          setDocuments(d => ({ ...d, [dt.docKey]: f }))
-                          // Clear reason when a file is uploaded
-                          setDocReasons(d => ({ ...d, [dt.docKey]: '' }))
-                          clearError(errKey)
-                        }}
-                      />
-                      {/* Reason input (shown when no file, for non-mandatory or as alternative) */}
-                      {!file && (
-                        <input
-                          type="text"
-                          placeholder={`Reason if not available`}
-                          value={reason}
-                          onChange={e => {
-                            setDocReasons(d => ({ ...d, [dt.docKey]: e.target.value }))
-                            clearError(errKey)
-                          }}
-                          className={`w-full h-8 px-2.5 text-xs text-gray-600 bg-gray-50 border rounded-lg outline-none transition-colors
-                            ${errors[errKey] ? 'border-red-400' : 'border-gray-200 focus:border-[#C35E33]'}`}
-                        />
-                      )}
-                      <ErrorMsg msg={errors[errKey]} />
-                    </div>
-                  )
-                })}
-              </div>
+              <input
+                type="file"
+                className="hidden"
+                accept=".pdf,.jpg,.jpeg,.png"
+                onChange={e => {
+                  const picked = e.target.files?.[0]
+                  e.target.value = ''
+                  if (!picked) return
+                  if (!DOC_ALLOWED.includes(picked.type)) {
+                    setErrors(prev => ({ ...prev, [errKey]: `Invalid format. Allowed: ${DOC_EXT_LIST}` }))
+                    return
+                  }
+                  if (picked.size > DOC_MAX_BYTES) {
+                    setErrors(prev => ({ ...prev, [errKey]: `File too large. Max ${DOC_MAX_MB} MB` }))
+                    return
+                  }
+                  setDocuments(d => ({ ...d, [docKey]: picked }))
+                  setDocReasons(d => ({ ...d, [docKey]: '' }))
+                  clearError(errKey)
+                }}
+              />
+            </label>
+
+            <p className="text-[10px] text-gray-400 -mt-0.5">{DOC_EXT_LIST} · Max {DOC_MAX_MB} MB</p>
+
+            {!(file instanceof File) && (
+              <input
+                type="text"
+                placeholder="Reason if document unavailable"
+                value={reason}
+                onChange={e => {
+                  setDocReasons(d => ({ ...d, [docKey]: e.target.value }))
+                  clearError(errKey)
+                }}
+                className={`w-full h-8 px-2.5 text-xs text-gray-600 bg-gray-50 border rounded-lg
+                  outline-none transition-colors
+                  ${errors[errKey] ? 'border-red-400' : 'border-gray-200 focus:border-[#C35E33]'}`}
+              />
             )}
-          </SectionCard>
+            <ErrorMsg msg={errors[errKey]} />
+          </div>
+        )
+      })}
+    </div>
+  )}
+</SectionCard>
 
           {/* ── Actions ── */}
           <div className="flex items-center justify-end gap-3 pt-2">

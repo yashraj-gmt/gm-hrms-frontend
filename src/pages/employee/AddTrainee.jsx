@@ -17,6 +17,11 @@ import apiClient from '@/services/apiClient'
 
 const PRIMARY = '#C35E33'
 
+const DOC_MAX_MB    = 5
+const DOC_MAX_BYTES = DOC_MAX_MB * 1024 * 1024
+const DOC_ALLOWED   = ['application/pdf', 'image/jpeg', 'image/png']
+const DOC_EXT_LIST  = 'PDF, JPG, PNG'
+
 const EMPLOYMENT_TYPE_ROUTES = {
   Internship: '/employees/add-intern',
   Training:   '/employees/add-trainee',
@@ -125,15 +130,15 @@ function buildErrors(p, office, training, edu, addr, bank, docs, docTypes) {
   if (!bank.aadhaarNumber.trim()) errs.aadhaarNumber = 'Aadhaar number is required'
   else if (!ADHAR_RE.test(bank.aadhaarNumber.replace(/\s/g, ''))) errs.aadhaarNumber = 'Aadhaar must be exactly 12 digits'
 
-  // ── Mandatory documents ────────────────────────────────────────────────────
   docTypes.forEach(dt => {
-    if (dt.mandatory) {
-      const hasFile   = docs[dt.docKey] instanceof File
-      const hasReason = docs[`reason_${dt.docKey}`]?.trim()
-      if (!hasFile && !hasReason) errs[`doc_${dt.docKey}`] = `${dt.name} is required`
-    }
-  })
-
+  if (dt.mandatory) {
+    const key       = dt.key || dt.docKey || String(dt.id)
+    const hasFile   = docs[key] instanceof File
+    const hasReason = docs[`reason_${key}`]?.trim()
+    if (!hasFile && !hasReason)
+      errs[`doc_${key}`] = `${dt.name} is required (upload file or provide reason)`
+  }
+})
   return errs
 }
 
@@ -345,39 +350,53 @@ export default function AddTrainee() {
   const [docs, setDocs] = useState({})
 
   // ── Load dropdowns ─────────────────────────────────────────────────────────
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const [deptRes, desigRes, branchRes, docRes] = await Promise.allSettled([
-          apiClient.get('/departments',  { params: { page: 0, size: 200 } }),
-          apiClient.get('/designations', { params: { page: 0, size: 200 } }),
-          apiClient.get('/branches',     { params: { page: 0, size: 200 } }),
-          apiClient.get('/document-types', { params: { applicableType: 'TRAINEE', page: 0, size: 100 } }),
-        ])
+useEffect(() => {
+  const load = async () => {
+    try {
+      const [deptRes, desigRes, branchRes, docRes] = await Promise.allSettled([
+        apiClient.get('/departments',  { params: { page: 0, size: 200 } }),
+        apiClient.get('/designations', { params: { page: 0, size: 200 } }),
+        apiClient.get('/branches',     { params: { page: 0, size: 200 } }),
+      
+        apiClient.get('/document-types', {
+          params: { applicableType: 'TRAINEE', page: 0, size: 100 }
+        }),
+      ])
 
-        if (deptRes.status === 'fulfilled') {
-          const d = deptRes.value?.data?.data ?? deptRes.value?.data ?? {}
-          setDepartments((d.content ?? d).filter(x => x.status !== false))
-        }
-        if (desigRes.status === 'fulfilled') {
-          const d = desigRes.value?.data?.data ?? desigRes.value?.data ?? {}
-          setDesignations((d.content ?? d).filter(x => x.active !== false))
-        }
-        if (branchRes.status === 'fulfilled') {
-          const d = branchRes.value?.data?.data ?? branchRes.value?.data ?? {}
-          setBranches((d.content ?? d).filter(x => x.active !== false))
-        }
-        if (docRes.status === 'fulfilled') {
-          const d = docRes.value?.data?.data ?? docRes.value?.data ?? {}
-          setDocTypes(d.content ?? d ?? [])
-        }
-      } finally {
-        setDeptLoading(false); setDesigLoading(false)
-        setBranchLoading(false); setDocLoading(false)
+      if (deptRes.status === 'fulfilled') {
+        const d = deptRes.value?.data?.data ?? deptRes.value?.data ?? {}
+        setDepartments((d.content ?? d).filter(x => x.status !== false))
       }
+      if (desigRes.status === 'fulfilled') {
+        const d = desigRes.value?.data?.data ?? desigRes.value?.data ?? {}
+        setDesignations((d.content ?? d).filter(x => x.active !== false))
+      }
+      if (branchRes.status === 'fulfilled') {
+        const d = branchRes.value?.data?.data ?? branchRes.value?.data ?? {}
+        setBranches((d.content ?? d).filter(x => x.active !== false))
+      }
+      if (docRes.status === 'fulfilled') {
+        const d = docRes.value?.data?.data ?? docRes.value?.data ?? {}
+    
+        const activeDocs = (d.content ?? d ?? []).filter(x => x.active !== false)
+        const seen   = new Set()
+        const unique = activeDocs.filter(dt => {
+const key = dt.key || dt.docKey || String(dt.id)
+          if (seen.has(key)) return false
+          seen.add(key)
+          return true
+        })
+        setDocTypes(unique)
+      }
+    } finally {
+      setDeptLoading(false)
+      setDesigLoading(false)
+      setBranchLoading(false)
+      setDocLoading(false)
     }
-    load()
-  }, [])
+  }
+  load()
+}, [])
 
   // ── Helpers ────────────────────────────────────────────────────────────────
   const up  = f => e => setPersonal(p  => ({ ...p,  [f]: e.target?.value ?? e }))
@@ -489,12 +508,17 @@ export default function AddTrainee() {
     if (personal.profilePhoto) fd.append('profileImage', personal.profilePhoto)
 
     // Dynamic documents
-    docTypes.forEach(dt => {
-      const file   = docs[dt.docKey]
-      const reason = docs[`reason_${dt.docKey}`]
-      if (file instanceof File) fd.append(dt.docKey, file)
-      if (reason?.trim())       fd.append(dt.docKey, reason.trim())
-    })
+    const reasonsMap = {}
+docTypes.forEach(dt => {
+  const key    = dt.key || dt.docKey || String(dt.id)
+  const file   = docs[key]
+  const reason = docs[`reason_${key}`]
+  if (file instanceof File) fd.append(key, file)
+  if (reason?.trim()) reasonsMap[key] = reason.trim()
+})
+if (Object.keys(reasonsMap).length > 0) {
+  fd.append('reasons', JSON.stringify(reasonsMap))
+}
 
     return fd
   }, [personal, office, training, edu, address, bank, docs, docTypes])
@@ -1040,42 +1064,88 @@ export default function AddTrainee() {
               <p className="text-sm text-gray-400 py-2">No documents configured for TRAINEE. Ask admin to add document types.</p>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {docTypes.map(dt => {
-                  const errKey = `doc_${dt.docKey}`
-                  const file   = docs[dt.docKey]
-                  const reason = docs[`reason_${dt.docKey}`] ?? ''
-                  return (
-                    <div key={dt.docKey} className="flex flex-col gap-1.5">
-                      <FieldLabel required={dt.mandatory}>
-                        {dt.name}
-                        {dt.mandatory && <span className="ml-1.5 text-[10px] font-normal text-gray-400">(mandatory)</span>}
-                      </FieldLabel>
-                      <FileUpload
-                        file={file instanceof File ? file : null}
-                        accept=".pdf,.jpg,.jpeg,.png"
-                        error={errors[errKey]}
-                        onChange={f => {
-                          setDocs(d => ({ ...d, [dt.docKey]: f, [`reason_${dt.docKey}`]: '' }))
-                          clearError(errKey)
-                        }}
-                      />
-                      {!(file instanceof File) && (
-                        <input
-                          type="text"
-                          placeholder="Reason if not available"
-                          value={reason}
-                          onChange={e => {
-                            setDocs(d => ({ ...d, [`reason_${dt.docKey}`]: e.target.value }))
-                            clearError(errKey)
-                          }}
-                          className={`w-full h-8 px-2.5 text-xs text-gray-600 bg-gray-50 border rounded-lg outline-none transition-colors
-                            ${errors[errKey] ? 'border-red-400' : 'border-gray-200 focus:border-[#C35E33]'}`}
-                        />
-                      )}
-                      <ErrorMsg msg={errors[errKey]} />
-                    </div>
-                  )
-                })}
+{docTypes.map(dt => {
+  const docKey = dt.key || dt.docKey || String(dt.id)
+  const errKey = `doc_${docKey}`
+  const file   = docs[docKey]
+  const reason = docs[`reason_${docKey}`] ?? ''
+  return (
+    <div key={docKey} className="flex flex-col gap-1.5">
+      <FieldLabel required={dt.mandatory}>
+        {dt.name}
+        {dt.mandatory && (
+          <span className="ml-1.5 text-[10px] font-normal text-gray-400">(mandatory)</span>
+        )}
+      </FieldLabel>
+
+      {/* File upload with inline validation */}
+      <label className="relative cursor-pointer">
+        <div className={`flex items-center h-9 px-3 bg-gray-50 border rounded-lg hover:bg-gray-100 transition-colors
+          ${errors[errKey] ? 'border-red-400' : 'border-gray-200'}`}>
+          <span className="text-sm text-gray-400 flex-1 truncate">
+            {file instanceof File ? file.name : 'Choose File'}
+          </span>
+          <div className="w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 ml-2"
+            style={{ backgroundColor: PRIMARY }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white"
+              strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+              <polyline points="17 8 12 3 7 8"/>
+              <line x1="12" y1="3" x2="12" y2="15"/>
+            </svg>
+          </div>
+        </div>
+        <input
+          type="file"
+          className="hidden"
+          accept=".pdf,.jpg,.jpeg,.png"
+          onChange={e => {
+            const picked = e.target.files?.[0]
+            e.target.value = ''
+            if (!picked) return
+            // ── Type validation ──
+            if (!DOC_ALLOWED.includes(picked.type)) {
+              setErrors(prev => ({ ...prev, [errKey]: `Invalid format. Allowed: ${DOC_EXT_LIST}` }))
+              return
+            }
+            // ── Size validation ──
+            if (picked.size > DOC_MAX_BYTES) {
+              setErrors(prev => ({ ...prev, [errKey]: `File too large. Max ${DOC_MAX_MB} MB` }))
+              return
+            }
+            setDocs(d => ({ ...d, [docKey]: picked, [`reason_${docKey}`]: '' }))
+            clearError(errKey)
+          }}
+        />
+      </label>
+
+      {/* Format hint */}
+      <p className="text-[10px] text-gray-400 -mt-0.5">
+        {DOC_EXT_LIST} · Max {DOC_MAX_MB} MB
+      </p>
+
+      {/* Reason input — only when no file */}
+      {!(file instanceof File) && (
+        <input
+          type="text"
+          placeholder="Reason if document unavailable"
+          value={reason}
+          onChange={e => {
+            setDocs(d => ({ ...d, [`reason_${docKey}`]: e.target.value }))
+            clearError(errKey)
+          }}
+          className={`w-full h-8 px-2.5 text-xs text-gray-600 bg-gray-50 border rounded-lg
+            outline-none transition-colors
+            ${errors[errKey] ? 'border-red-400' : 'border-gray-200 focus:border-[#C35E33]'}`}
+        />
+      )}
+
+      {/* Single error message — shown ONCE only */}
+      <ErrorMsg msg={errors[errKey]} />
+    </div>
+  )
+})}
+
               </div>
             )}
           </SectionCard>
