@@ -10,12 +10,21 @@ export const ROUTES = {
   DASHBOARD:      '/dashboard',
   PROFILE:        '/profile',
 
-  // ── Employee Module ──────────────────────────────────────────────────────────
-  EMPLOYEE:           '/employees',
-  EMPLOYEE_ADD:       '/employees/add',
-  EMPLOYEE_ADD_INTERN:'/employees/add-intern',
-  EMPLOYEE_ADD_TRAINEE:'/employees/add-trainee',
-  EMPLOYEE_EDIT:        '/employees/:id/edit', 
+// ── Employee Module ──────────────────────────────────────────────────────────
+EMPLOYEE:                  '/employee',
+EMPLOYEE_ADD:              '/employee/add',
+EMPLOYEE_ADD_INTERN:       '/employee/add-intern',
+EMPLOYEE_ADD_TRAINEE:      '/employee/add-trainee',
+
+// Employee view / edit / draft
+EMPLOYEE_VIEW:             '/employee/:id/view',
+EMPLOYEE_EDIT:             '/employee/:id/edit',
+EMPLOYEE_DRAFT:            '/employee/:id/draft',
+
+// Trainee view / edit / draft
+EMPLOYEE_TRAINEE_VIEW:     '/trainee/:id/view',
+EMPLOYEE_TRAINEE_EDIT:     '/trainee/:id/edit',     
+EMPLOYEE_TRAINEE_DRAFT:    '/trainee/:id/draft',   
 
   // ── Attendance ───────────────────────────────────────────────────────────────
   ATTENDANCE:                  '/attendance',

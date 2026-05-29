@@ -5,13 +5,14 @@ import { useNavigate } from 'react-router-dom'
 import {
   Filter, Search, UserPlus, ChevronLeft, ChevronRight,
   ArrowUpDown, ArrowUp, ArrowDown, Trash2, ChevronDown,
-  Eye, Pencil,
+  Eye, Pencil, RefreshCw, X,
 } from 'lucide-react'
 import FilterModal   from '@/components/shared/FilterModal'
 import ConfirmModal  from '@/components/shared/ConfirmModal'
 import { useToast }  from '@/components/shared/toast/ToastProvider'
 import { useAuthStore } from '@/store/authStore'
 import profileIcon from '@/assets/images/profile-icon.png'
+import { ROUTES } from '@/constants/routes'
 import employeeService, {
   STATUS_TO_API, API_TO_STATUS, TYPE_TO_API, API_TO_TYPE,
 } from '@/services/employeeService'
@@ -28,6 +29,43 @@ const FILTER_CONFIG = [
   { key: 'from',   label: 'Joined From', type: 'date'  },
   { key: 'to',     label: 'Joined To',   type: 'date'  },
 ]
+
+// ─── Role-aware navigation helper ─────────────────────────────────────────────
+/**
+ * Returns the correct route path based on action + employment type.
+ * Accepts both raw API values ('TRAINEE', 'INTERN', 'EMPLOYEE')
+ * and display labels ('Training', 'Internship', 'Employee').
+ *
+ * @param {'View'|'Edit'|'Draft'} action
+ * @param {string|number} id      — employee record ID
+ * @param {string}        type    — raw or display employment type
+ * @param {boolean}       isDraft — whether the record is a draft
+ * @returns {string} resolved path
+ */
+function resolveRoute(action, id, type, isDraft = false) {
+  const isTrainee = type === 'Training'   || type === 'TRAINEE'
+  const isIntern  = type === 'Internship' || type === 'INTERN'
+
+  switch (action) {
+    case 'View':
+      if (isTrainee) return ROUTES.EMPLOYEE_TRAINEE_VIEW.replace(':id', id)
+      // if (isIntern) return ROUTES.EMPLOYEE_INTERN_VIEW.replace(':id', id)
+      return ROUTES.EMPLOYEE_VIEW.replace(':id', id)
+
+    case 'Edit':
+      if (isTrainee) return ROUTES.EMPLOYEE_TRAINEE_EDIT.replace(':id', id)  // ← FIX
+      // if (isIntern) return ROUTES.EMPLOYEE_INTERN_EDIT.replace(':id', id)
+      return ROUTES.EMPLOYEE_EDIT.replace(':id', id)
+
+    case 'Draft':
+      if (isTrainee) return ROUTES.EMPLOYEE_TRAINEE_DRAFT.replace(':id', id) // ← FIX
+      // if (isIntern) return ROUTES.EMPLOYEE_INTERN_DRAFT.replace(':id', id)
+      return ROUTES.EMPLOYEE_DRAFT.replace(':id', id)
+
+    default:
+      return ROUTES.EMPLOYEE_VIEW.replace(':id', id)
+  }
+}
 
 // ─── Status badge ─────────────────────────────────────────────────────────────
 function StatusBadge({ status }) {
@@ -48,7 +86,19 @@ function StatusBadge({ status }) {
 }
 
 // ─── Action dropdown (portal-based to avoid overflow clipping) ────────────────
-function ActionDropdown({ employeeId, currentStatus, onStatusChange, onDelete, canDelete, isDraft, onView, onEditDraft }) {
+// Now accepts `employeeType` and forwards it through onView/onEdit/onEditDraft
+function ActionDropdown({
+  employeeId,
+  employeeType,       // ← NEW: raw or display employment type
+  currentStatus,
+  onStatusChange,
+  onDelete,
+  canDelete,
+  isDraft,
+  onView,
+  onEdit,
+  onEditDraft,
+}) {
   const [open, setOpen] = useState(false)
   const [menuPos, setMenuPos] = useState({ top: 0, left: 0 })
   const btnRef  = useRef(null)
@@ -75,13 +125,25 @@ function ActionDropdown({ employeeId, currentStatus, onStatusChange, onDelete, c
     return () => window.removeEventListener('scroll', h, true)
   }, [open])
 
+  // Smart viewport-aware positioning — flip menu above button if near bottom
   const handleToggle = (e) => {
     e.stopPropagation()
     if (!open && btnRef.current) {
       const rect = btnRef.current.getBoundingClientRect()
+      const menuHeight = 260
+      const spaceBelow = window.innerHeight - rect.bottom
+      const spaceAbove = rect.top
+
+      let top
+      if (spaceBelow < menuHeight && spaceAbove > menuHeight) {
+        top = rect.top - menuHeight - 4
+      } else {
+        top = rect.bottom + 4
+      }
+
       setMenuPos({
-        top:  rect.bottom + 4,
-        left: rect.right - 160,   // align right edge with button right edge
+        top,
+        left: rect.right - 160,
       })
     }
     setOpen(v => !v)
@@ -92,6 +154,9 @@ function ActionDropdown({ employeeId, currentStatus, onStatusChange, onDelete, c
     { label: 'Inactive', apiVal: 'INACTIVE',  dot: '#B91C1C' },
     { label: 'Hold',     apiVal: 'ON_HOLD',   dot: '#1F2937' },
   ]
+
+  // Filter out the current status so it won't appear as an option
+  const filteredStatusOptions = statusOptions.filter(opt => opt.label !== currentStatus)
 
   const menu = open ? createPortal(
     <div
@@ -109,7 +174,7 @@ function ActionDropdown({ employeeId, currentStatus, onStatusChange, onDelete, c
       {/* ── View / Edit Draft ── */}
       {isDraft ? (
         <button
-          onClick={() => { onEditDraft(employeeId); setOpen(false) }}
+          onClick={() => { onEditDraft(employeeId, employeeType); setOpen(false) }}
           className="w-full flex items-center gap-2.5 px-3 py-2.5 text-xs font-medium hover:bg-orange-50 transition-colors text-left"
           style={{ color: PRIMARY }}
         >
@@ -117,23 +182,33 @@ function ActionDropdown({ employeeId, currentStatus, onStatusChange, onDelete, c
           Continue Editing
         </button>
       ) : (
-        <button
-          onClick={() => { onView(employeeId); setOpen(false) }}
-          className="w-full flex items-center gap-2.5 px-3 py-2.5 text-xs font-medium hover:bg-gray-50 transition-colors text-left text-gray-700"
-        >
-          <Eye size={12} />
-          View
-        </button>
+        <>
+          <button
+            onClick={() => { onView(employeeId, employeeType); setOpen(false) }}
+            className="w-full flex items-center gap-2.5 px-3 py-2.5 text-xs font-medium hover:bg-gray-50 transition-colors text-left text-gray-700"
+          >
+            <Eye size={12} />
+            View
+          </button>
+          <button
+            onClick={() => { onEdit(employeeId, employeeType); setOpen(false) }}
+            className="w-full flex items-center gap-2.5 px-3 py-2.5 text-xs font-medium hover:bg-orange-50 transition-colors text-left"
+            style={{ color: PRIMARY }}
+          >
+            <Pencil size={12} />
+            Edit
+          </button>
+        </>
       )}
 
       {/* ── Status section (submitted only) ── */}
-      {!isDraft && (
+      {!isDraft && filteredStatusOptions.length > 0 && (
         <>
           <div className="h-px bg-gray-100 mx-3" />
           <p className="px-3 pt-2 pb-1 text-[10px] font-semibold text-gray-400 uppercase tracking-wider">
             Set Status
           </p>
-          {statusOptions.map(({ label, apiVal, dot }) => (
+          {filteredStatusOptions.map(({ label, apiVal, dot }) => (
             <button
               key={label}
               onClick={() => { onStatusChange(employeeId, apiVal, label); setOpen(false) }}
@@ -141,12 +216,6 @@ function ActionDropdown({ employeeId, currentStatus, onStatusChange, onDelete, c
             >
               <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: dot }} />
               <span className="text-gray-700">{label}</span>
-              {currentStatus === label && (
-                <svg className="ml-auto" width="12" height="12" viewBox="0 0 24 24" fill="none"
-                  stroke={PRIMARY} strokeWidth="2.5" strokeLinecap="round">
-                  <path d="M20 6 9 17l-5-5" />
-                </svg>
-              )}
             </button>
           ))}
         </>
@@ -282,6 +351,51 @@ function Pagination({ current, totalElements, pageSize, onPageChange, onSizeChan
   )
 }
 
+// ─── Active Filter Chips ──────────────────────────────────────────────────────
+function ActiveFilterChips({ activeFilters, onRemoveFilter }) {
+  const chips = []
+
+  const FILTER_LABELS = {
+    status: 'Status',
+    type:   'Type',
+    dept:   'Department',
+    from:   'From',
+    to:     'To',
+  }
+
+  Object.entries(activeFilters).forEach(([key, value]) => {
+    if (Array.isArray(value)) {
+      value.forEach(v => chips.push({ key, value: v, label: `${FILTER_LABELS[key] ?? key}: ${v}`, isArray: true }))
+    } else if (value) {
+      chips.push({ key, value, label: `${FILTER_LABELS[key] ?? key}: ${value}`, isArray: false })
+    }
+  })
+
+  if (chips.length === 0) return null
+
+  return (
+    <div className="flex flex-wrap gap-2 mb-3">
+      {chips.map((chip, i) => (
+        <span
+          key={`${chip.key}-${chip.value}-${i}`}
+          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium border"
+          style={{ backgroundColor: '#FFF7F4', borderColor: '#F4C9B5', color: PRIMARY }}
+        >
+          {chip.label}
+          <button
+            onClick={() => onRemoveFilter(chip.key, chip.isArray ? chip.value : null)}
+            className="flex items-center justify-center rounded-full hover:bg-orange-100 transition-colors"
+            style={{ width: 14, height: 14 }}
+            title="Remove filter"
+          >
+            <X size={9} strokeWidth={3} />
+          </button>
+        </span>
+      ))}
+    </div>
+  )
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 export default function EmployeeList() {
   const navigate = useNavigate()
@@ -291,6 +405,7 @@ export default function EmployeeList() {
 
   const [employees,      setEmployees]      = useState([])
   const [loading,        setLoading]        = useState(true)
+  const [refreshing,     setRefreshing]     = useState(false)
   const [totalElements,  setTotalElements]  = useState(0)
   const [counts,         setCounts]         = useState({
     totalEmployees: 0, activeCount: 0, inactiveCount: 0, onHoldCount: 0, draftCount: 0,
@@ -325,8 +440,9 @@ export default function EmployeeList() {
     return p
   }, [page, pageSize, sortBy, sortDir, activeTab, search, activeFilters])
 
-  const fetchEmployees = useCallback(async () => {
-    setLoading(true)
+  const fetchEmployees = useCallback(async (isManualRefresh = false) => {
+    if (isManualRefresh) setRefreshing(true)
+    else setLoading(true)
     try {
       const res     = await employeeService.getAll(apiParams)
       const payload = res?.data?.data ?? res?.data ?? {}
@@ -347,11 +463,12 @@ export default function EmployeeList() {
       toast.error(err?.response?.data?.message || err?.message || 'Failed to load employees')
     } finally {
       setLoading(false)
+      setRefreshing(false)
     }
   }, [apiParams])
 
   useEffect(() => {
-    const id = setTimeout(fetchEmployees, search ? 350 : 0)
+    const id = setTimeout(() => fetchEmployees(false), search ? 350 : 0)
     return () => clearTimeout(id)
   }, [fetchEmployees, search])
 
@@ -364,13 +481,16 @@ export default function EmployeeList() {
   }
 
   const handleStatusChange = async (id, apiStatus, displayLabel) => {
+    // Optimistic UI update for the employee row
     setEmployees(prev => prev.map(e => e.id === id ? { ...e, status: displayLabel } : e))
     try {
       await employeeService.updateStatus(id, apiStatus)
       toast.success(`Status updated to ${displayLabel}`)
+      // Re-fetch to update the summary counts (Active/Inactive/Hold cards)
+      fetchEmployees(false)
     } catch (err) {
       toast.error(err?.response?.data?.message || err?.message || 'Failed to update status')
-      fetchEmployees()
+      fetchEmployees(false)
     }
   }
 
@@ -381,12 +501,27 @@ export default function EmployeeList() {
       await employeeService.delete(deleteTarget)
       toast.success('Employee deactivated successfully')
       setDeleteTarget(null)
-      fetchEmployees()
+      fetchEmployees(false)
     } catch (err) {
       toast.error(err?.response?.data?.message || err?.message || 'Failed to delete employee')
     } finally {
       setDeleting(false)
     }
+  }
+
+  const handleRemoveFilter = (key, arrayValue) => {
+    setActiveFilters(prev => {
+      const updated = { ...prev }
+      if (arrayValue !== null && Array.isArray(updated[key])) {
+        const newArr = updated[key].filter(v => v !== arrayValue)
+        if (newArr.length === 0) delete updated[key]
+        else updated[key] = newArr
+      } else {
+        delete updated[key]
+      }
+      return updated
+    })
+    setPage(1)
   }
 
   const filterCount = Object.values(activeFilters).filter(v =>
@@ -409,16 +544,35 @@ export default function EmployeeList() {
           <h1 className="text-xl font-bold text-gray-900 m-0">Employee Management</h1>
           <p className="text-xs text-gray-400 mt-0.5">Manage and track all employees</p>
         </div>
-        <button
-          onClick={() => navigate('/employees/add')}
-          className="flex items-center gap-2 text-white rounded-lg px-4 py-2.5 text-[13px] font-semibold cursor-pointer whitespace-nowrap border-none transition-colors"
-          style={{ backgroundColor: '#111827' }}
-          onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#374151')}
-          onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#111827')}
-        >
-          <UserPlus size={15} strokeWidth={2} />
-          Add Employee
-        </button>
+
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => fetchEmployees(true)}
+            disabled={refreshing}
+            className="flex items-center gap-2 rounded-lg px-3 py-2.5 text-[13px] font-semibold cursor-pointer whitespace-nowrap border transition-colors disabled:opacity-60"
+            style={{ borderColor: '#E5E7EB', color: '#374151', backgroundColor: '#fff' }}
+            onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#F9FAFB')}
+            onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#fff')}
+            title="Refresh list"
+          >
+            <RefreshCw
+              size={14}
+              strokeWidth={2}
+              style={{ animation: refreshing ? 'spin 0.7s linear infinite' : 'none' }}
+            />
+          </button>
+
+          <button
+            onClick={() => navigate(ROUTES.EMPLOYEE_ADD)}
+            className="flex items-center gap-2 text-white rounded-lg px-4 py-2.5 text-[13px] font-semibold cursor-pointer whitespace-nowrap border-none transition-colors"
+            style={{ backgroundColor: '#111827' }}
+            onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#374151')}
+            onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#111827')}
+          >
+            <UserPlus size={15} strokeWidth={2} />
+            Add Employee
+          </button>
+        </div>
       </div>
 
       {/* ── Stats cards ── */}
@@ -503,7 +657,13 @@ export default function EmployeeList() {
         </div>
       </div>
 
-      {/* ── Table — NOTE: no overflow-hidden on wrapper; dropdown uses portal ── */}
+      {/* ── Active filter chips ── */}
+      <ActiveFilterChips
+        activeFilters={activeFilters}
+        onRemoveFilter={handleRemoveFilter}
+      />
+
+      {/* ── Table ── */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm">
         <div className="overflow-x-auto rounded-xl">
           <table className="w-full border-collapse" style={{ minWidth: 700 }}>
@@ -552,21 +712,22 @@ export default function EmployeeList() {
                   <tr
                     key={emp.id}
                     className="hover:bg-gray-50 transition-colors cursor-pointer"
-                    onClick={() => navigate(`/employees/${emp.id}`)}
+                    // ✅ FIX: Row click uses resolveRoute with emp.rawType for correct page per role
+                    onClick={() => navigate(resolveRoute('View', emp.id, emp.rawType, emp.isDraft))}
                   >
                     <td className="px-3.5 py-3 text-[11px] font-bold text-gray-400 border-b border-gray-50 whitespace-nowrap">
                       {emp.employeeCode ?? `#${String(emp.id).padStart(2, '0')}`}
                     </td>
-                    
+
                     <td className="px-3.5 py-3 border-b border-gray-50 whitespace-nowrap">
                       <div className="flex items-center gap-2.5">
                         {emp.profileImageUrl ? (
                           <img
-  src={emp.profileImageUrl || profileIcon}
-  alt={emp.fullName}
-  className="w-7 h-7 rounded-full object-cover flex-shrink-0"
-  onError={e => { e.currentTarget.src = profileIcon }}
-/>
+                            src={emp.profileImageUrl || profileIcon}
+                            alt={emp.fullName}
+                            className="w-7 h-7 rounded-full object-cover flex-shrink-0"
+                            onError={e => { e.currentTarget.src = profileIcon }}
+                          />
                         ) : (
                           <div
                             className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0"
@@ -595,14 +756,20 @@ export default function EmployeeList() {
                       }
                     </td>
                     <td className="px-3.5 py-3 border-b border-gray-50" onClick={e => e.stopPropagation()}>
+                      {/*
+                        ✅ FIX: Pass employeeType={emp.rawType} so ActionDropdown can forward
+                        it through onView/onEdit/onEditDraft → resolveRoute picks correct page.
+                      */}
                       <ActionDropdown
                         employeeId={emp.id}
+                        employeeType={emp.rawType}
                         currentStatus={emp.status}
                         isDraft={emp.isDraft}
                         onStatusChange={handleStatusChange}
                         onDelete={() => setDeleteTarget(emp.id)}
-                        onView={(id) => navigate(`/employees/${id}`)}
-                        onEditDraft={(id) => navigate(`/employees/${id}/edit`)}
+                        onView={(id, type) => navigate(resolveRoute('View',  id, type, false))}
+                        onEdit={(id, type) => navigate(resolveRoute('Edit',  id, type, false))}
+                        onEditDraft={(id, type) => navigate(resolveRoute('Draft', id, type, true))}
                         canDelete={isAdmin}
                       />
                     </td>
@@ -640,6 +807,8 @@ export default function EmployeeList() {
         variant="danger"
         loading={deleting}
       />
+
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </>
   )
 }
@@ -652,10 +821,19 @@ function initials(name = '') {
 function formatDate(dateStr) {
   if (!dateStr) return '—'
   try {
-    return new Date(dateStr).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '-')
+    return new Date(dateStr).toLocaleDateString('en-GB', {
+      day: '2-digit', month: '2-digit', year: 'numeric',
+    }).replace(/\//g, '-')
   } catch { return dateStr }
 }
 
+/**
+ * Normalise a raw API employee record into the shape the table needs.
+ *
+ * KEY ADDITION: `rawType` preserves the original API employmentType value
+ * ('EMPLOYEE' | 'INTERN' | 'TRAINEE') so resolveRoute() can branch correctly
+ * without depending on display-label string matching.
+ */
 function normaliseEmployee(item) {
   return {
     id:              item.id,
@@ -669,6 +847,7 @@ function normaliseEmployee(item) {
     date:            item.joiningDate,
     status:          API_TO_STATUS[item.status] || 'Active',
     type:            API_TO_TYPE[item.employmentType] || item.employmentType,
+    rawType:         item.employmentType,
     isDraft:         item.recordStatus === 'DRAFT',
   }
 }

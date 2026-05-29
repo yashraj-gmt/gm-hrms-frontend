@@ -204,7 +204,6 @@ function SidebarPanel({ items }) {
                 })}
                 onMouseEnter={(e) => {
                   const link = e.currentTarget
-                  // Only apply hover bg when not active (active has white bg)
                   if (link.style.backgroundColor !== 'rgb(255, 255, 255)') {
                     link.style.backgroundColor = 'rgba(255,255,255,0.08)'
                   }

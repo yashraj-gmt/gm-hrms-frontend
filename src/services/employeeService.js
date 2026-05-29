@@ -56,8 +56,37 @@ const employeeService = {
 
   /**
    * GET /api/employees/:id
+   * Returns EmployeeResponseDTO (extends BaseUserResponseDTO).
+   *
+   * KEY RESPONSE STRUCTURE — consumed by AddEmployee & ViewEmployee:
+   *   emp.contact.personalPhone    ← NOT emp.personalPhone
+   *   emp.contact.emergencyPhone   ← NOT emp.emergencyPhone
+   *   emp.contact.personalEmail    ← NOT emp.personalEmail
+   *   emp.contact.officeEmail      ← NOT emp.officeEmail
+   *   emp.reportingManagerName     ← NOT emp.reportingManager
+   *   emp.employment.dateOfJoining ← for employees
+   *   emp.employment.ctc
+   *   emp.employment.yearOfExperience
+   *   emp.employment.noticePeriod
+   *   emp.employment.previousCompanyNames
+   *   emp.personalInformationId    ← used to fetch documents separately
    */
   getById: (id) => apiClient.get(`/employees/${id}`),
+
+  /**
+   * GET /api/persons/:personalInformationId/documents
+   * Returns the list of PersonalDocument records for a person.
+   *
+   * Each document has:
+   *   id, documentTypeName, docKey / documentTypeKey, filePath, reason, mandatory
+   *
+   * Used by ViewEmployee and AddEmployee (edit mode) to show existing documents.
+   *
+   * @param {number|string} personalInformationId
+   * @returns {Promise<PersonalDocument[]>}
+   */
+  getDocuments: (personalInformationId) =>
+    apiClient.get(`/persons/${personalInformationId}/documents`),
 
   /**
    * POST /api/users  (multipart/form-data)
@@ -70,7 +99,7 @@ const employeeService = {
    *   Optional parts:
    *     employee / intern / trainee  – JSON string
    *     <docKey>             – File (e.g. 'aadhaar', 'pan')
-   *     reason_<docKey>      – string (reason for missing doc)
+   *     reasons              – JSON string { docKey: 'reason text' }
    */
   create: (formData) =>
     apiClient.post('/users', formData, {
@@ -136,10 +165,11 @@ const employeeService = {
       if (file) fd.append(key, file)
     })
 
-    // Document absence reasons  (prefix reason_ so backend can distinguish)
-    Object.entries(reasons).forEach(([key, text]) => {
-      if (text) fd.append(`reason_${key}`, text)
-    })
+    // Document absence reasons as a single JSON blob (backend parses as Map<String,String>)
+    const reasonEntries = Object.entries(reasons).filter(([, text]) => !!text)
+    if (reasonEntries.length > 0) {
+      fd.append('reasons', JSON.stringify(Object.fromEntries(reasonEntries)))
+    }
 
     return fd
   },

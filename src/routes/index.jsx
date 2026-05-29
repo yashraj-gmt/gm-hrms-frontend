@@ -21,7 +21,11 @@ const EmployeeList    = lazy(() => import('@/pages/employee/EmployeeList'))
 const AddEmployee     = lazy(() => import('@/pages/employee/AddEmployee'))
 const AddIntern       = lazy(() => import('@/pages/employee/AddIntern'))
 const AddTrainee      = lazy(() => import('@/pages/employee/AddTrainee'))
-const EditEmployee = lazy(() => import('@/pages/employee/EditEmployee'))
+const ViewEmployee    = lazy(() => import('@/pages/employee/ViewEmployee'))
+const ViewTrainee     = lazy(() => import('@/pages/employee/ViewTrainee'))
+
+
+
 
 
 // ── Attendance ────────────────────────────────────────────────────────────────
@@ -136,12 +140,22 @@ export const router = createBrowserRouter([
       // ── Dashboard
       rr(ROUTES.DASHBOARD, DashboardRouter),
 
-      // ── Employee
-      rr(ROUTES.EMPLOYEE,             EmployeeList),
-      rr(ROUTES.EMPLOYEE_ADD_INTERN,  AddIntern),
-      rr(ROUTES.EMPLOYEE_ADD_TRAINEE, AddTrainee),
-      rr(ROUTES.EMPLOYEE_ADD,         AddEmployee),
-      rr(ROUTES.EMPLOYEE_EDIT,        EditEmployee),
+rr(ROUTES.EMPLOYEE,               EmployeeList),
+rr(ROUTES.EMPLOYEE_ADD_INTERN,    AddIntern),
+rr(ROUTES.EMPLOYEE_ADD_TRAINEE,   AddTrainee),
+rr(ROUTES.EMPLOYEE_ADD,           AddEmployee),
+
+// ── Employee view / edit / draft
+rr(ROUTES.EMPLOYEE_VIEW,          ViewEmployee),
+rr(ROUTES.EMPLOYEE_EDIT,          AddEmployee),
+rr(ROUTES.EMPLOYEE_DRAFT,         AddEmployee),
+
+// ── Trainee view / edit / draft    
+rr(ROUTES.EMPLOYEE_TRAINEE_VIEW,  ViewTrainee),
+rr(ROUTES.EMPLOYEE_TRAINEE_EDIT,  AddTrainee),  
+rr(ROUTES.EMPLOYEE_TRAINEE_DRAFT, AddTrainee),  
+
+
 
       // ── Attendance (Admin / HR view)
       rr(ROUTES.ATTENDANCE,         AttendanceOverview),

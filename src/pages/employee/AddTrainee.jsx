@@ -1,15 +1,27 @@
 // src/pages/employee/AddTrainee.jsx
+// Unified page — handles Add, Edit Draft, and Edit (submitted) modes
+// Routes:
+//   /employee/add-trainee          → Add mode
+//   /trainee/:id/draft             → Edit Draft mode  (personalInformationId)
+//   /trainee/:id/edit              → Edit Submitted mode (personalInformationId)
 
 import { useState, useEffect, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { Mail, Save, UserPlus } from 'lucide-react'
+import { useNavigate, useParams, useLocation } from 'react-router-dom'
+import { Mail, Save, UserPlus, ArrowLeft, Loader2, FileText, CheckCircle } from 'lucide-react'
 import { useToast } from '@/components/shared/toast/ToastProvider'
 import SearchableSelect from '@/components/shared/SearchableSelect'
 import employeeService from '@/services/employeeService'
 import apiClient from '@/services/apiClient'
 import shiftService from '@/services/shiftService'
+import profileIconFallback from '@/assets/images/profile-icon.png'
 
 const PRIMARY = '#C35E33'
+
+// ─── File-upload constraints ───────────────────────────────────────────────
+const PROFILE_PHOTO_MAX_MB    = 5
+const PROFILE_PHOTO_MAX_BYTES = PROFILE_PHOTO_MAX_MB * 1024 * 1024
+const PROFILE_PHOTO_ALLOWED   = ['image/jpeg', 'image/png', 'image/gif', 'image/webp']
+const PROFILE_PHOTO_EXT_LIST  = 'JPG, JPEG, PNG, GIF, WEBP'
 
 const DOC_MAX_MB    = 5
 const DOC_MAX_BYTES = DOC_MAX_MB * 1024 * 1024
@@ -17,18 +29,32 @@ const DOC_ALLOWED   = ['application/pdf', 'image/jpeg', 'image/png']
 const DOC_EXT_LIST  = 'PDF, JPG, PNG'
 
 const EMPLOYMENT_TYPE_ROUTES = {
-  Internship: '/employees/add-intern',
-  Training:   '/employees/add-trainee',
-  Employee:   '/employees/add',
+  Internship: '/employee/add-intern',
+  Training:   '/employee/add-trainee',
+  Employee:   '/employee/add',
 }
 
-// ─── Validation ───────────────────────────────────────────────────────────────
+// ─── Regex helpers ─────────────────────────────────────────────────────────
 const PHONE_RE = /^[6-9]\d{9}$/
 const EMAIL_RE = /^[A-Za-z0-9+_.-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/
 const PAN_RE   = /^[A-Z]{5}\d{4}[A-Z]$/
 const ADHAR_RE = /^\d{12}$/
 const IFSC_RE  = /^[A-Z]{4}0[A-Z0-9]{6}$/
 
+const API_TO_WMODE  = { REMOTE: 'Remote', HYBRID: 'Hybrid', ONSITE: 'On site', ON_SITE: 'On site' }
+const API_TO_WTYPE  = { FULL_TIME: 'Full-time', PART_TIME: 'Part-time', CONTRACTUAL: 'Contractual' }
+const API_TO_STATUS = { ACTIVE: 'Active', INACTIVE: 'Inactive', ON_HOLD: 'On Hold' }
+const STATUS_TO_API = { Active: 'ACTIVE', Inactive: 'INACTIVE', 'On Hold': 'ON_HOLD' }
+
+const MONTH_NAMES = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+]
+
+const CURRENT_YEAR = new Date().getFullYear()
+const YEAR_OPTIONS = Array.from({ length: 20 }, (_, i) => String(CURRENT_YEAR - 19 + i))
+
+// ─── Validation helpers ─────────────────────────────────────────────────────
 function validatePhone(value, fieldName) {
   const cleaned = (value || '').replace(/[\s\-()]/g, '')
   if (!cleaned) return `${fieldName} is required`
@@ -44,7 +70,7 @@ function validateEmail(value, fieldName) {
   return null
 }
 
-function buildErrors(p, office, training, edu, addr, bank, docs, docTypes) {
+function buildErrors(p, office, training, edu, addr, bank, docs, docReasons, docTypes, existingDocs) {
   const errs = {}
 
   if (!p.firstName.trim())   errs.firstName     = 'First name is required'
@@ -54,7 +80,11 @@ function buildErrors(p, office, training, edu, addr, bank, docs, docTypes) {
   if (!p.dob)                errs.dob           = 'Date of birth is required'
   if (!p.maritalStatus)      errs.maritalStatus = 'Marital status is required'
   if (!p.spouseName.trim())  errs.spouseName    = 'Spouse / parent name is required'
-  if (!p.profilePhoto)       errs.profilePhoto  = 'Profile photo is required'
+
+  // ✅ FIX 3: Profile photo required only if no existing URL and no new file chosen
+  const hasExistingPhoto = typeof p.profilePhoto === 'string' && p.profilePhoto.trim()
+  const hasNewPhoto      = p.profilePhoto instanceof File
+  if (!hasExistingPhoto && !hasNewPhoto) errs.profilePhoto = 'Profile photo is required'
 
   const phoneErr = validatePhone(p.personalPhone, 'Personal phone')
   if (phoneErr) errs.personalPhone = phoneErr
@@ -78,18 +108,20 @@ function buildErrors(p, office, training, edu, addr, bank, docs, docTypes) {
     errs.endDate = 'End date cannot be before start date'
   if (!training.trainingPeriodMonths)
     errs.trainingPeriodMonths = 'Training period is required'
-  if (!training.stipend || isNaN(training.stipend) || Number(training.stipend) < 0)
-    errs.stipend = 'Stipend is required (0 for unpaid)'
+  if (training.stipend === '' || training.stipend === null || training.stipend === undefined)
+    errs.stipend = 'Stipend is required (enter 0 for unpaid)'
+  else if (isNaN(training.stipend) || Number(training.stipend) < 0)
+    errs.stipend = 'Stipend must be a non-negative number'
 
-  if (!edu.hscCompletion.trim())      errs.hscCompletion      = '12th completion is required'
-  if (!edu.hscYear)                   errs.hscYear            = '12th year is required'
-  if (!edu.bachelorCompletion.trim()) errs.bachelorCompletion = 'Bachelor completion is required'
-  if (!edu.bachelorYear)              errs.bachelorYear       = 'Bachelor year is required'
-  if (!edu.degreeName.trim())         errs.degreeName         = 'Degree name is required'
-  if (!edu.degreeResult.trim())       errs.degreeResult       = 'Degree result is required'
-  if (!edu.universityName.trim())     errs.universityName     = 'University name is required'
-  if (!edu.universityAddress.trim())  errs.universityAddress  = 'University address is required'
-  if (!edu.trainingStatus)            errs.trainingStatus     = 'Training completion status is required'
+  if (!edu.hscMonth)              errs.hscMonth           = '12th completion month is required'
+  if (!edu.hscYear)               errs.hscYear            = '12th year is required'
+  if (!edu.bachelorMonth)         errs.bachelorMonth      = 'Bachelor completion month is required'
+  if (!edu.bachelorYear)          errs.bachelorYear       = 'Bachelor year is required'
+  if (!edu.degreeName.trim())     errs.degreeName         = 'Degree name is required'
+  if (!edu.degreeResult.trim())   errs.degreeResult       = 'Degree result is required'
+  if (!edu.universityName.trim()) errs.universityName     = 'University name is required'
+  if (!edu.universityAddress.trim()) errs.universityAddress = 'University address is required'
+  if (!edu.trainingStatus)        errs.trainingStatus     = 'Training completion status is required'
 
   if (!addr.currentAddress.trim()) errs.currentAddress = 'Current address is required'
   if (!addr.city.trim())           errs.city           = 'City is required'
@@ -109,29 +141,23 @@ function buildErrors(p, office, training, edu, addr, bank, docs, docTypes) {
     if (!addr.permCountry.trim())  errs.permCountry  = 'Country is required'
   }
 
-  if (!bank.bankName.trim())      errs.bankName      = 'Bank name is required'
-  if (!bank.accountNumber.trim()) errs.accountNumber = 'Account number is required'
-  if (!bank.ifscCode.trim())      errs.ifscCode      = 'IFSC code is required'
-  else if (!IFSC_RE.test(bank.ifscCode.toUpperCase())) errs.ifscCode = 'IFSC format invalid (e.g. HDFC0001234)'
-  if (!bank.panNumber.trim())     errs.panNumber     = 'PAN number is required'
-  else if (!PAN_RE.test(bank.panNumber.toUpperCase())) errs.panNumber = 'PAN format invalid (e.g. ABCDE1234F)'
-  if (!bank.aadhaarNumber.trim()) errs.aadhaarNumber = 'Aadhaar number is required'
-  else if (!ADHAR_RE.test(bank.aadhaarNumber.replace(/\s/g, ''))) errs.aadhaarNumber = 'Aadhaar must be exactly 12 digits'
-
+if (Array.isArray(docTypes)) {
   docTypes.forEach(dt => {
     if (dt.mandatory) {
-      const key     = dt.key || dt.docKey || String(dt.id)
-      const hasFile = docs[key] instanceof File
-      const hasReason = docs[`reason_${key}`]?.trim()
-      if (!hasFile && !hasReason)
+      const key         = dt.key || dt.docKey || String(dt.id)
+      const hasFile     = docs[key] instanceof File     // ← key, not docKey
+      const hasExisting = !!(existingDocs?.[key]?.filePath)
+      const hasReason   = docReasons?.[key]?.trim()
+      if (!hasFile && !hasExisting && !hasReason)
         errs[`doc_${key}`] = `${dt.name} is required (upload file or provide reason)`
     }
   })
+}
 
   return errs
 }
 
-// ─── Shared primitives ────────────────────────────────────────────────────────
+// ─── Reusable UI primitives ─────────────────────────────────────────────────
 function FieldLabel({ children, required }) {
   return (
     <label className="block text-xs font-medium text-gray-500 mb-1">
@@ -139,10 +165,12 @@ function FieldLabel({ children, required }) {
     </label>
   )
 }
+
 function ErrorMsg({ msg }) {
   return msg ? <p className="text-[11px] text-red-500 mt-0.5">{msg}</p> : null
 }
-function TextInput({ placeholder, type = 'text', value, onChange, error, className = '', numericOnly = false }) {
+
+function TextInput({ placeholder, type = 'text', value, onChange, error, className = '', numericOnly = false, readOnly = false }) {
   const h = (e) => {
     if (numericOnly) onChange({ target: { value: e.target.value.replace(/\D/g, '') } })
     else onChange(e)
@@ -150,14 +178,17 @@ function TextInput({ placeholder, type = 'text', value, onChange, error, classNa
   return (
     <>
       <input
-        type={type} placeholder={placeholder} value={value} onChange={h}
+        type={type} placeholder={placeholder} value={value} onChange={h} readOnly={readOnly}
         className={`w-full h-9 px-3 text-sm text-gray-700 bg-gray-50 border rounded-lg outline-none transition-colors placeholder:text-gray-400
-          ${error ? 'border-red-400 focus:border-red-500' : 'border-gray-200 focus:border-[#C35E33] focus:bg-white'} ${className}`}
+          ${error       ? 'border-red-400 focus:border-red-500'
+          : readOnly    ? 'border-gray-100 bg-gray-100 cursor-not-allowed opacity-70'
+                        : 'border-gray-200 focus:border-[#C35E33] focus:bg-white'} ${className}`}
       />
       <ErrorMsg msg={error} />
     </>
   )
 }
+
 function SelectInput({ children, value, onChange, error }) {
   return (
     <>
@@ -170,6 +201,7 @@ function SelectInput({ children, value, onChange, error }) {
     </>
   )
 }
+
 function PhoneInput({ value, onChange, error }) {
   const h = (e) => onChange({ target: { value: e.target.value.replace(/\D/g, '').slice(0, 10) } })
   return (
@@ -184,6 +216,7 @@ function PhoneInput({ value, onChange, error }) {
     </>
   )
 }
+
 function RadioOption({ name, value, checked, onChange, label }) {
   return (
     <label className="flex items-center gap-1.5 cursor-pointer">
@@ -196,28 +229,157 @@ function RadioOption({ name, value, checked, onChange, label }) {
     </label>
   )
 }
-function FileUpload({ onChange, file, error, accept = '*' }) {
-  const h = (e) => {
-    if (e.target.files?.length > 0) onChange(e.target.files[0])
+
+// ─── FIX 3: Profile Photo Upload with preview + fallback ───────────────────
+function ProfilePhotoUpload({ file, onChange, error }) {
+  const [imgError, setImgError] = useState(false)
+
+  // file can be: File object (new upload) | string URL (existing from DB) | null
+  const previewUrl = file instanceof File
+    ? URL.createObjectURL(file)
+    : typeof file === 'string' && file ? file : null
+
+  // Reset imgError when file changes
+  useEffect(() => { setImgError(false) }, [file])
+
+  const handleChange = (e) => {
+    const picked = e.target.files?.[0]
     e.target.value = ''
+    if (!picked) return
+    if (!PROFILE_PHOTO_ALLOWED.includes(picked.type)) {
+      onChange(null, `Invalid format. Allowed: ${PROFILE_PHOTO_EXT_LIST}`)
+      return
+    }
+    if (picked.size > PROFILE_PHOTO_MAX_BYTES) {
+      onChange(null, `File too large. Max size is ${PROFILE_PHOTO_MAX_MB} MB`)
+      return
+    }
+    onChange(picked, null)
   }
+
+  const displayName = file instanceof File
+    ? file.name
+    : typeof file === 'string' && file
+      ? file.split('/').pop()
+      : null
+
   return (
-    <>
+    <div>
+      {/* ✅ FIX 3: Show preview image if URL/File exists, with fallback avatar */}
+      {previewUrl && (
+        <div className="mb-2 flex items-center gap-3">
+          <div className="w-16 h-16 rounded-xl overflow-hidden border-2 flex-shrink-0"
+            style={{ borderColor: error ? '#F87171' : '#E8C5A8' }}>
+            {!imgError ? (
+              <img
+                src={previewUrl}
+                alt="Profile"
+                className="w-full h-full object-cover"
+                onError={() => setImgError(true)}
+              />
+            ) : (
+              <img
+                src={profileIconFallback}
+                alt="Profile fallback"
+                className="w-full h-full object-cover"
+              />
+            )}
+          </div>
+          <div className="min-w-0">
+            <p className="text-xs font-medium text-gray-700 truncate max-w-[160px]" title={displayName}>
+              {imgError ? 'Image unavailable' : (displayName || 'Current photo')}
+            </p>
+            <p className="text-[10px] text-gray-400 mt-0.5">Click below to replace</p>
+          </div>
+        </div>
+      )}
+
       <label className="relative cursor-pointer">
-        <div className={`flex items-center h-9 px-3 bg-gray-50 border rounded-lg hover:bg-gray-100 transition-colors ${error ? 'border-red-400' : 'border-gray-200'}`}>
-          <span className="text-sm text-gray-400 flex-1 truncate">{file ? file.name : 'Choose File'}</span>
+        <div className={`flex items-center h-9 px-3 bg-gray-50 border rounded-lg hover:bg-gray-100 transition-colors ${
+          error ? 'border-red-400' : 'border-gray-200'
+        }`}>
+          <span className="text-sm text-gray-400 flex-1 truncate">
+            {displayName || 'Choose Photo'}
+          </span>
           <div className="w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 ml-2" style={{ backgroundColor: PRIMARY }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+              <polyline points="17 8 12 3 7 8"/>
+              <line x1="12" y1="3" x2="12" y2="15"/>
             </svg>
           </div>
         </div>
-        <input type="file" className="hidden" accept={accept} onChange={h} />
+        <input type="file" className="hidden" accept={PROFILE_PHOTO_ALLOWED.join(',')} onChange={handleChange} />
       </label>
+      <p className="text-[10px] text-gray-400 mt-0.5 leading-relaxed">
+        Formats: {PROFILE_PHOTO_EXT_LIST} · Max {PROFILE_PHOTO_MAX_MB} MB
+      </p>
       <ErrorMsg msg={error} />
-    </>
+    </div>
   )
 }
+
+// ─── FIX 1 + 2: Document card showing existing uploaded file from DB ────────
+function ExistingDocBadge({ filePath, onReplace }) {
+  const [broken, setBroken] = useState(false)
+  const filename = filePath ? filePath.split('/').pop() : 'Document'
+  const isPdf    = filename.toLowerCase().endsWith('.pdf')
+
+  return (
+    <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-green-200 bg-green-50">
+      {/* ✅ FIX 2: Show doc icon with fallback for broken image URLs */}
+      <div className="w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 bg-green-100">
+        {isPdf || broken ? (
+          <FileText size={14} color="#16A34A" />
+        ) : (
+          <img
+            src={filePath}
+            alt="doc"
+            className="w-7 h-7 rounded-md object-cover"
+            onError={() => setBroken(true)}
+          />
+        )}
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-[10px] font-semibold text-green-800 truncate" title={filename}>
+          {filename}
+        </p>
+        <p className="text-[9px] text-green-600">Uploaded ✓</p>
+      </div>
+      <button
+        type="button"
+        onClick={onReplace}
+        className="text-[9px] font-semibold text-gray-400 hover:text-red-500 transition-colors whitespace-nowrap"
+        title="Replace document"
+      >
+        Replace
+      </button>
+    </div>
+  )
+}
+
+// ─── Month-Year Picker ──────────────────────────────────────────────────────
+function MonthYearPicker({ monthValue, yearValue, onMonthChange, onYearChange, monthError, yearError, required }) {
+  return (
+    <div className="flex gap-2">
+      <div className="flex-1">
+        <FieldLabel required={required}>Month</FieldLabel>
+        <SelectInput value={monthValue} onChange={e => onMonthChange(e.target.value)} error={monthError}>
+          <option value="">Month</option>
+          {MONTH_NAMES.map(m => <option key={m} value={m}>{m}</option>)}
+        </SelectInput>
+      </div>
+      <div className="flex-1">
+        <FieldLabel required={required}>Year</FieldLabel>
+        <SelectInput value={yearValue} onChange={e => onYearChange(e.target.value)} error={yearError}>
+          <option value="">Year</option>
+          {YEAR_OPTIONS.map(y => <option key={y} value={y}>{y}</option>)}
+        </SelectInput>
+      </div>
+    </div>
+  )
+}
+
 function SectionCard({ title, children, className = '' }) {
   return (
     <div className={`bg-white rounded-xl border-2 p-5 ${className}`} style={{ borderColor: '#E8C5A8' }}>
@@ -225,11 +387,10 @@ function SectionCard({ title, children, className = '' }) {
       {children}
     </div>
   )
-  
 }
 
-// ─── Email Confirmation Modal ─────────────────────────────────────────────────
-function EmailConfirmModal({ isOpen, onClose, onConfirm, loading, traineeName, email }) {
+// ─── Email Confirmation Modal ───────────────────────────────────────────────
+function EmailConfirmModal({ isOpen, onClose, onConfirm, loading, traineeName, email, isEdit }) {
   if (!isOpen) return null
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center"
@@ -245,16 +406,23 @@ function EmailConfirmModal({ isOpen, onClose, onConfirm, loading, traineeName, e
           </div>
           <button onClick={onClose} disabled={loading}
             className="w-7 h-7 rounded-lg bg-gray-700 flex items-center justify-center text-gray-300 hover:bg-gray-600 disabled:opacity-40">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+              <path d="M18 6 6 18M6 6l12 12"/>
+            </svg>
           </button>
         </div>
         <div className="px-6 py-6 flex flex-col items-center text-center gap-4">
-          <div className="w-14 h-14 rounded-2xl flex items-center justify-center bg-blue-50"><Mail size={28} color="#1E40AF" /></div>
+          <div className="w-14 h-14 rounded-2xl flex items-center justify-center bg-blue-50">
+            <Mail size={28} color="#1E40AF" />
+          </div>
           <div>
-            <p className="text-base font-bold text-gray-900 mb-1">Send Credentials?</p>
+            <p className="text-base font-bold text-gray-900 mb-1">
+              {isEdit ? 'Submit Trainee?' : 'Send Credentials?'}
+            </p>
             <p className="text-sm text-gray-500 leading-relaxed">
-              This will create the trainee record for <strong className="text-gray-700">{traineeName}</strong> and
-              send login credentials to <strong className="text-gray-700">{email || 'the provided email'}</strong>.
+              This will {isEdit ? 'finalise the record' : 'create the trainee record'} for{' '}
+              <strong className="text-gray-700">{traineeName}</strong> and send login credentials
+              to <strong className="text-gray-700">{email || 'the provided email'}</strong>.
             </p>
           </div>
         </div>
@@ -266,7 +434,12 @@ function EmailConfirmModal({ isOpen, onClose, onConfirm, loading, traineeName, e
           <button onClick={onConfirm} disabled={loading}
             className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white flex items-center justify-center gap-2 disabled:opacity-60"
             style={{ backgroundColor: '#2563EB' }}>
-            {loading && <svg className="animate-spin w-3.5 h-3.5" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>}
+            {loading && (
+              <svg className="animate-spin w-3.5 h-3.5" viewBox="0 0 24 24" fill="none">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+              </svg>
+            )}
             <Mail size={14} /> Submit & Send Email
           </button>
         </div>
@@ -275,20 +448,35 @@ function EmailConfirmModal({ isOpen, onClose, onConfirm, loading, traineeName, e
   )
 }
 
-const STATUS_TO_API = { Active: 'ACTIVE', Inactive: 'INACTIVE', 'On Hold': 'ON_HOLD' }
-const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-const YEARS   = Array.from({ length: 15 }, (_, i) => String(2012 + i))
-
-// ─── Main Page ────────────────────────────────────────────────────────────────
+// ─── Main Page ──────────────────────────────────────────────────────────────
 export default function AddTrainee() {
+  const { id }    = useParams()
   const navigate  = useNavigate()
+  const location  = useLocation()
   const { toast } = useToast()
 
+  // ✅ FIX: Mode detection updated for new trainee-specific routes
+  // /trainee/:id/draft  → isDraftMode
+  // /trainee/:id/edit   → isEditMode
+  // /employee/add-trainee → isAddMode
+  const isDraftMode = !!id && location.pathname.includes('/draft')
+  const isEditMode  = !!id && location.pathname.includes('/edit')
+  const isAddMode   = !id
+
+  const pageTitle = isEditMode  ? 'Edit Trainee'
+                  : isDraftMode ? 'Edit Draft'
+                  :               'Add Trainee'
+
+  // ── Loading / UI states ──────────────────────────────────────────────────
+  const [pageLoading, setPageLoading] = useState(!!id)
   const [errors,      setErrors]      = useState({})
   const [submitting,  setSubmitting]  = useState(false)
   const [showConfirm, setShowConfirm] = useState(false)
 
-  // ── Dropdown state ─────────────────────────────────────────────────────────
+  // ✅ FIX 5: Store traineeDbId (the Trainee table PK) for the update API call
+  const [traineeDbId, setTraineeDbId] = useState(null)
+
+  // ── Dropdown data ────────────────────────────────────────────────────────
   const [departments,   setDepartments]   = useState([])
   const [designations,  setDesignations]  = useState([])
   const [branches,      setBranches]      = useState([])
@@ -300,33 +488,39 @@ export default function AddTrainee() {
   const [shiftLoading,  setShiftLoading]  = useState(true)
   const [docLoading,    setDocLoading]    = useState(true)
 
-  // ── Form state ─────────────────────────────────────────────────────────────
+  // ── Form state ───────────────────────────────────────────────────────────
   const [personal, setPersonal] = useState({
     firstName: '', middleName: '', lastName: '', gender: '',
     dob: '', personalPhone: '', emergencyPhone: '', personalEmail: '',
     maritalStatus: '', spouseName: '', profilePhoto: null,
   })
+
   const [office, setOffice] = useState({
+    traineeId: '',
     designation: '', designationId: null,
     department: '',  departmentId: null,
     officeEmail: '',
     workLocation: '', workLocationId: null,
     shiftId: null,   shiftName: '',
+    reportingManager: '',
   })
+
   const [training, setTraining] = useState({
     startDate: '', endDate: '',
     trainingPeriodMonths: '', stipend: '',
     workingType: 'Full-time', workMode: 'Remote',
     status: 'Active',
   })
+
   const [edu, setEdu] = useState({
-    hscCompletion: '', hscYear: '',
-    bachelorCompletion: '', bachelorYear: '',
-    masterCompletion: '', masterYear: '',
+    hscMonth: '', hscYear: '',
+    bachelorMonth: '', bachelorYear: '',
+    masterMonth: '', masterYear: '',
     degreeName: '', degreeResult: '',
     universityName: '', universityAddress: '',
     trainingStatus: '',
   })
+
   const [address, setAddress] = useState({
     currentAddress: '', city: '', district: '', landmark: '',
     state: '', pinCode: '', country: 'India',
@@ -334,14 +528,21 @@ export default function AddTrainee() {
     permAddress: '', permCity: '', permDistrict: '', permLandmark: '',
     permState: '', permPinCode: '', permCountry: 'India',
   })
+
   const [bank, setBank] = useState({
     bankName: '', accountNumber: '', ifscCode: '',
     panNumber: '', aadhaarNumber: '', pfNumber: '',
     uanNumber: '', esicNumber: '',
   })
-  const [docs, setDocs] = useState({})
 
-  // ── Load dropdowns ─────────────────────────────────────────────────────────
+  const [documents,     setDocuments]     = useState({})   // { docKey: File } for newly uploaded
+  const [docReasons,    setDocReasons]    = useState({})   // { docKey: 'reason text' }
+  // ✅ FIX 1: existingDocs stores DB records: { docKey: { filePath, reason, ... } }
+  const [existingDocs,  setExistingDocs]  = useState({})
+  // Track which existing docs the user wants to replace
+  const [replacingDocs, setReplacingDocs] = useState({})
+
+  // ── Load dropdowns ───────────────────────────────────────────────────────
   useEffect(() => {
     const load = async () => {
       try {
@@ -356,58 +557,215 @@ export default function AddTrainee() {
         if (deptRes.status === 'fulfilled') {
           const d = deptRes.value?.data?.data ?? deptRes.value?.data ?? {}
           setDepartments((d.content ?? d).filter(x => x.status !== false))
-        } else {
-          console.error('Failed to load departments:', deptRes.reason)
         }
-
         if (desigRes.status === 'fulfilled') {
           const d = desigRes.value?.data?.data ?? desigRes.value?.data ?? {}
           setDesignations((d.content ?? d).filter(x => x.active !== false))
-        } else {
-          console.error('Failed to load designations:', desigRes.reason)
         }
-
         if (branchRes.status === 'fulfilled') {
           const d = branchRes.value?.data?.data ?? branchRes.value?.data ?? {}
           setBranches((d.content ?? d).filter(x => x.active !== false))
-        } else {
-          console.error('Failed to load branches:', branchRes.reason)
         }
-
         if (shiftRes.status === 'fulfilled') {
           const d = shiftRes.value?.data?.data ?? shiftRes.value?.data ?? {}
           setShifts((d.content ?? []).filter(x => x.isActive !== false))
-        } else {
-          console.error('Failed to load shifts:', shiftRes.reason)
         }
-
         if (docRes.status === 'fulfilled') {
           const d = docRes.value?.data?.data ?? docRes.value?.data ?? {}
           const activeDocs = (d.content ?? d ?? []).filter(x => x.active !== false)
-          const seen   = new Set()
-          const unique = activeDocs.filter(dt => {
+          const seen = new Set()
+          setDocTypes(activeDocs.filter(dt => {
             const key = dt.key || dt.docKey || String(dt.id)
             if (seen.has(key)) return false
             seen.add(key)
             return true
-          })
-          setDocTypes(unique)
-        } else {
-          console.error('Failed to load document types:', docRes.reason)
+          }))
         }
-
       } finally {
-        setDeptLoading(false)
-        setDesigLoading(false)
-        setBranchLoading(false)
-        setShiftLoading(false)
-        setDocLoading(false)
+        setDeptLoading(false); setDesigLoading(false)
+        setBranchLoading(false); setShiftLoading(false); setDocLoading(false)
       }
     }
     load()
   }, [])
 
-  // ── Helpers ────────────────────────────────────────────────────────────────
+  // ── Load existing trainee data in edit/draft modes ───────────────────────
+  useEffect(() => {
+    if (!id) return
+    const load = async () => {
+      setPageLoading(true)
+      try {
+        // id here is personalInformationId (after backend fix)
+        const res = await employeeService.getById(id)
+        const emp = res?.data?.data ?? res?.data ?? {}
+        const contact = emp.contact ?? {}
+
+        // ✅ FIX 5: Store the Trainee table PK for the PATCH /api/trainees/:traineeId call
+        if (emp.traineeId) setTraineeDbId(emp.traineeId)
+
+        setPersonal({
+          firstName:     emp.firstName          ?? '',
+          middleName:    emp.middleName         ?? '',
+          lastName:      emp.lastName           ?? '',
+          gender:        emp.gender             ?? '',
+          dob:           emp.dateOfBirth        ?? '',
+          personalPhone: contact.personalPhone  ?? '',
+          emergencyPhone:contact.emergencyPhone ?? '',
+          personalEmail: contact.personalEmail  ?? '',
+          maritalStatus: emp.maritalStatus      ?? '',
+          spouseName:    emp.spouseOrParentName  ?? '',
+          // ✅ FIX 3: profilePhoto set to URL string — ProfilePhotoUpload renders it
+          profilePhoto:  emp.profileImageUrl    ?? null,
+        })
+
+        setOffice({
+          traineeId:        emp.traineeCode                   ?? '',
+          designation:      emp.designationName               ?? '',
+          designationId:    null,
+          department:       emp.departmentName                ?? '',
+          departmentId:     null,
+          officeEmail:      contact.officeEmail               ?? '',
+          workLocation:     emp.branchName                    ?? '',
+          workLocationId:   null,
+          shiftId:          null,
+          shiftName:        emp.shiftTiming                   ?? '',
+          reportingManager: emp.reportingManagerName          ?? '',
+        })
+
+        const td = emp.trainingDetails ?? {}
+        setTraining({
+          startDate:            td.startDate             ?? '',
+          endDate:              td.endDate               ?? '',
+          trainingPeriodMonths: td.trainingPeriodMonths  != null ? String(td.trainingPeriodMonths) : '',
+          stipend:              td.stipend               != null ? String(td.stipend) : '',
+          workingType:          API_TO_WTYPE[td.workingType] ?? 'Full-time',
+          workMode:             API_TO_WMODE[td.workMode]    ?? 'Remote',
+          status:               API_TO_STATUS[emp.status]    ?? 'Active',
+        })
+
+        const ed = emp.educationDetails ?? {}
+        setEdu({
+          hscMonth:         ed.hscCompletion       ?? '',
+          hscYear:          ed.hscYear             != null ? String(ed.hscYear)        : '',
+          bachelorMonth:    ed.bachelorCompletion   ?? '',
+          bachelorYear:     ed.bachelorYear         != null ? String(ed.bachelorYear)   : '',
+          masterMonth:      ed.masterCompletion     ?? '',
+          masterYear:       ed.masterYear           != null ? String(ed.masterYear)     : '',
+          degreeName:       ed.degreeName           ?? '',
+          degreeResult:     ed.degreeResult         ?? '',
+          universityName:   ed.universityName       ?? '',
+          universityAddress:ed.universityAddress    ?? '',
+          trainingStatus:   ed.trainingCompletionStatus ?? '',
+        })
+
+        const ca  = emp.currentAddress  ?? {}
+        const pa  = emp.permanentAddress ?? {}
+        const same = emp.sameAsCurrent ?? false
+        setAddress({
+          currentAddress: ca.addressLine ?? '',
+          city:           ca.city        ?? '',
+          district:       ca.district    ?? '',
+          landmark:       ca.landmark    ?? '',
+          state:          ca.state       ?? '',
+          pinCode:        ca.pinCode     ?? '',
+          country:        ca.country     ?? 'India',
+          sameAsCurrent:  same,
+          permAddress:    same ? (ca.addressLine ?? '') : (pa.addressLine ?? ''),
+          permCity:       same ? (ca.city        ?? '') : (pa.city        ?? ''),
+          permDistrict:   same ? (ca.district    ?? '') : (pa.district    ?? ''),
+          permLandmark:   same ? (ca.landmark    ?? '') : (pa.landmark    ?? ''),
+          permState:      same ? (ca.state       ?? '') : (pa.state       ?? ''),
+          permPinCode:    same ? (ca.pinCode     ?? '') : (pa.pinCode     ?? ''),
+          permCountry:    same ? (ca.country     ?? 'India') : (pa.country ?? 'India'),
+        })
+
+        const b = emp.bankDetails ?? {}
+        setBank({
+          bankName:      b.bankName      ?? '',
+          accountNumber: b.accountNumber ?? '',
+          ifscCode:      b.ifscCode      ?? '',
+          panNumber:     b.panNumber     ?? '',
+          aadhaarNumber: b.aadhaarNumber ?? '',
+          pfNumber:      b.pfNumber      ?? '',
+          uanNumber:     b.uanNumber     ?? '',
+          esicNumber:    b.esicNumber    ?? '',
+        })
+
+        const piId = emp.personalInformationId ?? id
+if (piId) {
+  loadExistingDocuments(piId)
+}
+      } catch {
+        toast.error('Failed to load trainee data')
+      } finally {
+        setPageLoading(false)
+      }
+    }
+    load()
+  }, [id])
+
+  // ── Resolve dropdown IDs by name after dropdowns load ───────────────────
+useEffect(() => {
+  if (isAddMode) return
+  // Don't run until at least one dropdown has loaded
+  if (!departments.length && !designations.length && !branches.length && !shifts.length) return
+
+  setOffice(prev => {
+    const updated = { ...prev }
+
+    if (prev.designation && !prev.designationId && designations.length > 0) {
+      const match = designations.find(d => d.name === prev.designation)
+      if (match) updated.designationId = match.id
+    }
+    if (prev.department && !prev.departmentId && departments.length > 0) {
+      const match = departments.find(d => d.name === prev.department)
+      if (match) updated.departmentId = match.id
+    }
+    if (prev.workLocation && !prev.workLocationId && branches.length > 0) {
+      const match = branches.find(b => b.branchName === prev.workLocation)
+      if (match) updated.workLocationId = match.id
+    }
+    if (prev.shiftName && !prev.shiftId && shifts.length > 0) {
+      const match = shifts.find(s => s.shiftName === prev.shiftName)
+      if (match) updated.shiftId = match.id
+    }
+    return updated
+  })
+}, [departments, designations, branches, shifts, isAddMode])
+
+  const loadExistingDocuments = async (personalInformationId) => {
+  try {
+    const res = await apiClient.get(`/persons/${personalInformationId}/documents`)
+    const docs = res?.data?.data ?? res?.data ?? []
+    if (Array.isArray(docs)) {
+      const existingMap = {}
+      const reasonMap   = {}
+
+      docs.forEach(doc => {
+        const key = doc.documentTypeKey 
+               ?? doc.docKey
+               ?? String(doc.documentTypeId ?? doc.id)
+
+        existingMap[key] = {
+          filePath: doc.filePath ?? null,
+          reason:   doc.reason   ?? null,
+          name:     doc.documentTypeName ?? doc.name ?? key,
+        }
+
+        if (doc.reason) {
+          reasonMap[key] = doc.reason
+        }
+      })
+
+      setExistingDocs(existingMap)
+      setDocReasons(prev => ({ ...prev, ...reasonMap })) 
+    }
+  } catch (err) {
+    console.error('Failed to load existing documents:', err)  
+  }
+}
+
+  // ── Helpers ──────────────────────────────────────────────────────────────
   const up  = f => e => setPersonal(p  => ({ ...p,  [f]: e.target?.value ?? e }))
   const upo = f => e => setOffice(o   => ({ ...o,   [f]: e.target?.value ?? e }))
   const upt = f => e => setTraining(t => ({ ...t,   [f]: e.target?.value ?? e }))
@@ -415,7 +773,7 @@ export default function AddTrainee() {
   const upa = f => e => setAddress(a  => ({ ...a,   [f]: e.target?.value ?? e }))
   const upb = f => e => setBank(b     => ({ ...b,   [f]: e.target?.value ?? e }))
 
-  const clearError  = k      => setErrors(p => { const n = { ...p }; delete n[k]; return n })
+  const clearError  = k       => setErrors(p => { const n = { ...p }; delete n[k]; return n })
   const clearErrors = (...ks) => setErrors(p => { const n = { ...p }; ks.forEach(k => delete n[k]); return n })
 
   const handleSameAsCurrent = (checked) => {
@@ -429,7 +787,7 @@ export default function AddTrainee() {
     if (checked) clearErrors('permAddress','permCity','permDistrict','permState','permPinCode','permCountry')
   }
 
-  // ── Build FormData ─────────────────────────────────────────────────────────
+  // ── Build FormData ────────────────────────────────────────────────────────
   const buildPayload = useCallback((isDraft) => {
     const personalInfo = {
       status:             isDraft ? 'DRAFT' : 'SUBMITTED',
@@ -446,13 +804,14 @@ export default function AddTrainee() {
       personalEmail:      personal.personalEmail.trim() || null,
       officeEmail:        office.officeEmail.trim() || null,
       workProfile: {
-        departmentId:  office.departmentId   || null,
-        designationId: office.designationId  || null,
-        branchId:      office.workLocationId || null,
-        shiftId:       office.shiftId        || null,
-        workMode:      training.workMode.toUpperCase().replace(/[\s-]+/g, '_'),
-        workingType:   training.workingType.toUpperCase().replace(/[\s-]+/g, '_'),
-        status:        STATUS_TO_API[training.status] || 'ACTIVE',
+        departmentId:       office.departmentId   || null,
+        designationId:      office.designationId  || null,
+        branchId:           office.workLocationId || null,
+        shiftId:            office.shiftId        || null,
+        reportingManagerId: office.reportingManager.trim() || null,
+        workMode:           training.workMode === 'On site' ? 'ONSITE' : training.workMode.toUpperCase(),
+        workingType:        training.workingType.toUpperCase().replace(/[\s-]+/g, '_'),
+        status:             STATUS_TO_API[training.status] || 'ACTIVE',
       },
       address: {
         currentAddress: {
@@ -488,26 +847,27 @@ export default function AddTrainee() {
     }
 
     const traineeData = {
+      traineeCode: office.traineeId.trim() || null,
       trainingDetails: {
         startDate:            training.startDate  || null,
         endDate:              training.endDate    || null,
         trainingPeriodMonths: training.trainingPeriodMonths !== '' ? Number(training.trainingPeriodMonths) : null,
         stipend:              training.stipend !== '' ? Number(training.stipend) : null,
-        workMode:             training.workMode.toUpperCase().replace(/[\s-]+/g, '_'),
+        workMode:             training.workMode === 'On site' ? 'ONSITE' : training.workMode.toUpperCase(),
         workingType:          training.workingType.toUpperCase().replace(/[\s-]+/g, '_'),
       },
       educationDetails: {
-        hscCompletion:            edu.hscCompletion.trim()      || null,
-        hscYear:                  edu.hscYear      ? Number(edu.hscYear)      : null,
-        bachelorCompletion:       edu.bachelorCompletion.trim() || null,
-        bachelorYear:             edu.bachelorYear ? Number(edu.bachelorYear) : null,
-        masterCompletion:         edu.masterCompletion.trim()   || null,
-        masterYear:               edu.masterYear   ? Number(edu.masterYear)   : null,
+        hscCompletion:            edu.hscMonth          || null,
+        hscYear:                  edu.hscYear           ? Number(edu.hscYear)         : null,
+        bachelorCompletion:       edu.bachelorMonth     || null,
+        bachelorYear:             edu.bachelorYear      ? Number(edu.bachelorYear)    : null,
+        masterCompletion:         edu.masterMonth       || null,
+        masterYear:               edu.masterYear        ? Number(edu.masterYear)      : null,
         degreeName:               edu.degreeName.trim()         || null,
         degreeResult:             edu.degreeResult.trim()       || null,
         universityName:           edu.universityName.trim()     || null,
         universityAddress:        edu.universityAddress.trim()  || null,
-        trainingCompletionStatus: edu.trainingStatus            || null,
+        trainingCompletionStatus: edu.trainingStatus             || null,
       },
     }
 
@@ -515,49 +875,114 @@ export default function AddTrainee() {
     fd.append('personalInformation', JSON.stringify(personalInfo))
     fd.append('trainee',             JSON.stringify(traineeData))
 
-    if (personal.profilePhoto) fd.append('profileImage', personal.profilePhoto)
+    // ✅ FIX 3: Only append profileImage if a NEW file was chosen
+    if (personal.profilePhoto instanceof File) {
+      fd.append('profileImage', personal.profilePhoto)
+    }
+    // If it's a string URL (existing), don't re-upload — backend keeps it as-is
 
+    // Document files — only newly uploaded ones
+    Object.entries(documents).forEach(([docKey, file]) => {
+      if (file instanceof File) fd.append(docKey, file)
+    })
+
+    // Document reasons
     const reasonsMap = {}
-    docTypes.forEach(dt => {
-      const key    = dt.key || dt.docKey || String(dt.id)
-      const file   = docs[key]
-      const reason = docs[`reason_${key}`]
-      if (file instanceof File) fd.append(key, file)
-      if (reason?.trim()) reasonsMap[key] = reason.trim()
+    Object.entries(docReasons).forEach(([docKey, reason]) => {
+      if (reason?.trim() && !(documents[docKey] instanceof File)) {
+        reasonsMap[docKey] = reason.trim()
+      }
     })
     if (Object.keys(reasonsMap).length > 0) {
       fd.append('reasons', JSON.stringify(reasonsMap))
     }
 
     return fd
-  }, [personal, office, training, edu, address, bank, docs, docTypes])
+  }, [personal, office, training, edu, address, bank, documents, docReasons])
 
-  // ── Save as Draft ──────────────────────────────────────────────────────────
+  // ── Save as Draft (Add mode only) ─────────────────────────────────────────
   const handleSaveDraft = async () => {
-    if (!personal.firstName.trim() || !personal.lastName.trim()) {
-      setErrors({
-        firstName: !personal.firstName.trim() ? 'First name is required' : undefined,
-        lastName:  !personal.lastName.trim()  ? 'Last name is required'  : undefined,
-      })
+    const draftErrs = {}
+    if (!personal.firstName.trim()) draftErrs.firstName = 'First name is required'
+    if (!personal.lastName.trim())  draftErrs.lastName  = 'Last name is required'
+
+    if (Object.keys(draftErrs).length > 0) {
+      setErrors(draftErrs)
       toast.warning('Please provide at least first and last name for draft')
       return
     }
+
     setSubmitting(true)
     try {
       const fd = buildPayload(true)
       await employeeService.create(fd)
       toast.success('Trainee saved as draft successfully')
-      navigate('/employees')
+      navigate('/employee')
     } catch (err) {
       toast.error(err?.response?.data?.message || err?.message || 'Failed to save draft')
     } finally {
       setSubmitting(false)
     }
   }
+const handleUpdate = async () => {
+  if (isDraftMode) {
+    const draftErrs = {}
+    if (!personal.firstName.trim()) draftErrs.firstName = 'First name is required'
+    if (!personal.lastName.trim())  draftErrs.lastName  = 'Last name is required'
+    if (Object.keys(draftErrs).length > 0) {
+      setErrors(draftErrs)
+      toast.warning('Please fix the highlighted fields')
+      return
+    }
+  } else {
+    const errs = buildErrors(
+      personal, office, training, edu, address,
+      bank, documents, docReasons, docTypes, existingDocs
+    )
+    if (Object.keys(errs).length > 0) {
+      setErrors(errs)
+      toast.warning('Please fix the highlighted fields before updating')
+      setTimeout(() => {
+        document.querySelector('[data-error="true"]')
+          ?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }, 100)
+      return
+    }
+  }
 
-  // ── Submit ─────────────────────────────────────────────────────────────────
+  setErrors({})
+  setSubmitting(true)
+
+  try {
+    const fd = buildPayload(isDraftMode)
+
+    console.log('traineeDbId:', traineeDbId, '| personalInformationId (id):', id)
+
+    if (traineeDbId) {
+      await apiClient.patch(`/trainees/${traineeDbId}`, fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+    } else {
+      await apiClient.patch(`/trainees/personal/${id}`, fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+    }
+
+    toast.success(isDraftMode ? 'Draft saved successfully' : 'Trainee updated successfully')
+    navigate('/employee')
+  } catch (err) {
+    console.error('Update error:', err?.response ?? err)
+    toast.error(
+      err?.response?.data?.message || err?.message || 'Failed to update trainee'
+    )
+  } finally {
+    setSubmitting(false)
+  }
+}
+
+  // ── Submit (Add mode only) ────────────────────────────────────────────────
   const handleSubmitClick = () => {
-    const errs = buildErrors(personal, office, training, edu, address, bank, docs, docTypes)
+    const errs = buildErrors(personal, office, training, edu, address, bank, documents, docReasons, docTypes, existingDocs)
     if (Object.keys(errs).length > 0) {
       setErrors(errs)
       toast.warning('Please fix the highlighted fields before submitting')
@@ -578,34 +1003,70 @@ export default function AddTrainee() {
       await employeeService.create(fd)
       toast.success('Trainee added successfully! Credentials sent via email.')
       setShowConfirm(false)
-      navigate('/employees')
+      navigate('/employee')
     } catch (err) {
-      toast.error(err?.response?.data?.message || err?.message || 'Failed to create trainee')
+      toast.error(err?.response?.data?.message || err?.message || 'Failed to submit trainee')
       setShowConfirm(false)
     } finally {
       setSubmitting(false)
     }
   }
 
-  // ─────────────────────────────────────────────────────────────────────────────
+  // ── Page loading screen ───────────────────────────────────────────────────
+  if (pageLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <div className="flex flex-col items-center gap-3">
+          <Loader2 className="animate-spin" size={32} color={PRIMARY} />
+          <p className="text-sm text-gray-500">Loading trainee data…</p>
+        </div>
+      </div>
+    )
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
   return (
     <>
       <div className="min-h-full pb-8">
 
-        {/* ── Header ── */}
+        {/* ── Page Header ── */}
         <div className="flex items-start justify-between mb-5 flex-wrap gap-4">
-          <h1 className="text-xl font-bold text-gray-900">Add Trainee</h1>
-          <div className="flex flex-col items-end gap-1.5">
-            <span className="text-xs font-semibold text-gray-700">Employment Type</span>
-            <div className="flex items-center gap-4">
-              {['Internship', 'Training', 'Employee'].map(type => (
-                <RadioOption key={type} name="employmentType" value={type}
-                  checked={type === 'Training'}
-                  onChange={() => navigate(EMPLOYMENT_TYPE_ROUTES[type])}
-                  label={type} />
-              ))}
-            </div>
+          <div className="flex items-center gap-3 flex-wrap">
+            <button
+              onClick={() => navigate('/employee')}
+              className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 transition-colors">
+              <ArrowLeft size={16} /> Back
+            </button>
+            <div className="h-5 w-px bg-gray-200" />
+            <h1 className="text-xl font-bold text-gray-900">{pageTitle}</h1>
+            {isDraftMode && (
+              <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-amber-100 text-amber-700 border border-amber-200">
+                Draft
+              </span>
+            )}
+            {isEditMode && (
+              <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-blue-100 text-blue-700 border border-blue-200">
+                Editing
+              </span>
+            )}
           </div>
+
+          {/* Employment type switcher — only in Add mode */}
+          {isAddMode && (
+            <div className="flex flex-col items-end gap-1.5">
+              <span className="text-xs font-semibold text-gray-700">Employment Type</span>
+              <div className="flex items-center gap-4">
+                {['Internship', 'Training', 'Employee'].map(type => (
+                  <RadioOption
+                    key={type} name="employmentType" value={type}
+                    checked={type === 'Training'}
+                    onChange={() => navigate(EMPLOYMENT_TYPE_ROUTES[type])}
+                    label={type}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="flex flex-col gap-5">
@@ -633,7 +1094,9 @@ export default function AddTrainee() {
                 <SelectInput value={personal.gender} error={errors.gender}
                   onChange={e => { up('gender')(e); clearError('gender') }}>
                   <option value="">Select Gender</option>
-                  <option>Male</option><option>Female</option><option>Other</option>
+                  <option value="MALE">Male</option>
+                  <option value="FEMALE">Female</option>
+                  <option value="OTHER">Other</option>
                 </SelectInput>
               </div>
             </div>
@@ -668,8 +1131,10 @@ export default function AddTrainee() {
                 <SelectInput value={personal.maritalStatus} error={errors.maritalStatus}
                   onChange={e => { up('maritalStatus')(e); clearError('maritalStatus') }}>
                   <option value="">Select Status</option>
-                  <option>Single</option><option>Married</option>
-                  <option>Divorced</option><option>Widowed</option>
+                  <option value="SINGLE">Single</option>
+                  <option value="MARRIED">Married</option>
+                  <option value="DIVORCED">Divorced</option>
+                  <option value="WIDOWED">Widowed</option>
                 </SelectInput>
               </div>
               <div data-error={!!errors.spouseName}>
@@ -682,15 +1147,40 @@ export default function AddTrainee() {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <div data-error={!!errors.profilePhoto}>
                 <FieldLabel required>Profile Photo</FieldLabel>
-                <FileUpload file={personal.profilePhoto} accept="image/*" error={errors.profilePhoto}
-                  onChange={f => { setPersonal(p => ({ ...p, profilePhoto: f })); clearError('profilePhoto') }} />
+                <ProfilePhotoUpload
+                  file={personal.profilePhoto}
+                  error={errors.profilePhoto}
+                  onChange={(file, validationError) => {
+                    if (validationError) {
+                      setErrors(e => ({ ...e, profilePhoto: validationError }))
+                      setPersonal(p => ({ ...p, profilePhoto: null }))
+                    } else {
+                      setPersonal(p => ({ ...p, profilePhoto: file }))
+                      clearError('profilePhoto')
+                    }
+                  }}
+                />
               </div>
             </div>
-          </SectionCard>   
+          </SectionCard>
 
           {/* ── Office / Work Profile ── */}
           <SectionCard title="Office Information">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-3">
+              <div>
+                <FieldLabel>Trainee ID {isAddMode && '(auto-generated if blank)'}</FieldLabel>
+                <TextInput
+                  placeholder="GMTR001"
+                  value={office.traineeId}
+                  error={errors.traineeId}
+                  readOnly={isEditMode}
+                  onChange={e => {
+                    setOffice(o => ({ ...o, traineeId: e.target.value }))
+                    clearError('traineeId')
+                  }}
+                />
+              </div>
+
               <div data-error={!!errors.designation}>
                 <FieldLabel required>Designation</FieldLabel>
                 <SearchableSelect
@@ -704,6 +1194,7 @@ export default function AddTrainee() {
                   }}
                 />
               </div>
+
               <div data-error={!!errors.department}>
                 <FieldLabel required>Department</FieldLabel>
                 <SearchableSelect
@@ -716,6 +1207,15 @@ export default function AddTrainee() {
                     clearError('department')
                   }}
                 />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+              <div data-error={!!errors.officeEmail}>
+                <FieldLabel required>Office Email</FieldLabel>
+                <TextInput type="email" placeholder="name@company.com" value={office.officeEmail}
+                  error={errors.officeEmail}
+                  onChange={e => { upo('officeEmail')(e); clearError('officeEmail') }} />
               </div>
               <div data-error={!!errors.workLocation}>
                 <FieldLabel required>Branch / Work Location</FieldLabel>
@@ -743,14 +1243,11 @@ export default function AddTrainee() {
                   }}
                 />
               </div>
-            </div>
-
-            <div className="grid grid-cols-2 md:grid-cols-2 gap-3">
-              <div data-error={!!errors.officeEmail}>
-                <FieldLabel required>Office Email</FieldLabel>
-                <TextInput type="email" placeholder="name@company.com" value={office.officeEmail}
-                  error={errors.officeEmail}
-                  onChange={e => { upo('officeEmail')(e); clearError('officeEmail') }} />
+              <div data-error={!!errors.reportingManager}>
+                <FieldLabel>Reporting Manager</FieldLabel>
+                <TextInput placeholder="Manager Name" value={office.reportingManager}
+                  error={errors.reportingManager}
+                  onChange={e => { upo('reportingManager')(e); clearError('reportingManager') }} />
               </div>
             </div>
           </SectionCard>
@@ -814,58 +1311,49 @@ export default function AddTrainee() {
 
           {/* ── Educational Details ── */}
           <SectionCard title="Educational Details">
-            <div className="grid grid-cols-2 gap-3 mb-3">
-              <div data-error={!!errors.hscCompletion}>
-                <FieldLabel required>12th (HSC) Completion</FieldLabel>
-                <SelectInput value={edu.hscCompletion} error={errors.hscCompletion}
-                  onChange={e => { upe('hscCompletion')(e); clearError('hscCompletion') }}>
-                  <option value="">Select…</option>
-                  {MONTHS.map(p => <option key={p}>{p}</option>)}
-                </SelectInput>
-              </div>
-              <div data-error={!!errors.hscYear}>
-                <FieldLabel required>12th Year</FieldLabel>
-                <SelectInput value={edu.hscYear} error={errors.hscYear}
-                  onChange={e => { upe('hscYear')(e); clearError('hscYear') }}>
-                  <option value="">Select Year</option>
-                  {YEARS.map(y => <option key={y}>{y}</option>)}
-                </SelectInput>
+            <div className="mb-4">
+              <p className="text-xs font-semibold text-gray-600 mb-2">12th (HSC)</p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div data-error={!!errors.hscMonth || !!errors.hscYear}>
+                  <MonthYearPicker
+                    required
+                    monthValue={edu.hscMonth}
+                    yearValue={edu.hscYear}
+                    onMonthChange={v => { setEdu(e => ({ ...e, hscMonth: v })); clearError('hscMonth') }}
+                    onYearChange={v =>  { setEdu(e => ({ ...e, hscYear:  v })); clearError('hscYear')  }}
+                    monthError={errors.hscMonth}
+                    yearError={errors.hscYear}
+                  />
+                </div>
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3 mb-3">
-              <div data-error={!!errors.bachelorCompletion}>
-                <FieldLabel required>Bachelor Degree Completion</FieldLabel>
-                <SelectInput value={edu.bachelorCompletion} error={errors.bachelorCompletion}
-                  onChange={e => { upe('bachelorCompletion')(e); clearError('bachelorCompletion') }}>
-                  <option value="">Select…</option>
-                  {MONTHS.map(p => <option key={p}>{p}</option>)}
-                </SelectInput>
-              </div>
-              <div data-error={!!errors.bachelorYear}>
-                <FieldLabel required>Bachelor Year</FieldLabel>
-                <SelectInput value={edu.bachelorYear} error={errors.bachelorYear}
-                  onChange={e => { upe('bachelorYear')(e); clearError('bachelorYear') }}>
-                  <option value="">Select Year</option>
-                  {YEARS.map(y => <option key={y}>{y}</option>)}
-                </SelectInput>
+            <div className="mb-4">
+              <p className="text-xs font-semibold text-gray-600 mb-2">Bachelor Degree</p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div data-error={!!errors.bachelorMonth || !!errors.bachelorYear}>
+                  <MonthYearPicker
+                    required
+                    monthValue={edu.bachelorMonth}
+                    yearValue={edu.bachelorYear}
+                    onMonthChange={v => { setEdu(e => ({ ...e, bachelorMonth: v })); clearError('bachelorMonth') }}
+                    onYearChange={v =>  { setEdu(e => ({ ...e, bachelorYear:  v })); clearError('bachelorYear')  }}
+                    monthError={errors.bachelorMonth}
+                    yearError={errors.bachelorYear}
+                  />
+                </div>
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3 mb-3">
-              <div>
-                <FieldLabel>Master Degree Completion</FieldLabel>
-                <SelectInput value={edu.masterCompletion} onChange={upe('masterCompletion')}>
-                  <option value="">Select…</option>
-                  {MONTHS.map(p => <option key={p}>{p}</option>)}
-                </SelectInput>
-              </div>
-              <div>
-                <FieldLabel>Master Year</FieldLabel>
-                <SelectInput value={edu.masterYear} onChange={upe('masterYear')}>
-                  <option value="">Select Year</option>
-                  {YEARS.map(y => <option key={y}>{y}</option>)}
-                </SelectInput>
+            <div className="mb-4">
+              <p className="text-xs font-semibold text-gray-600 mb-2">Master Degree <span className="text-gray-400 font-normal">(optional)</span></p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <MonthYearPicker
+                  monthValue={edu.masterMonth}
+                  yearValue={edu.masterYear}
+                  onMonthChange={v => setEdu(e => ({ ...e, masterMonth: v }))}
+                  onYearChange={v =>  setEdu(e => ({ ...e, masterYear:  v }))}
+                />
               </div>
             </div>
 
@@ -916,39 +1404,60 @@ export default function AddTrainee() {
               <div data-error={!!errors.currentAddress}>
                 <FieldLabel required>Address Line</FieldLabel>
                 <TextInput placeholder="Street / House No." value={address.currentAddress} error={errors.currentAddress}
-                  onChange={e => { upa('currentAddress')(e); clearError('currentAddress'); if (address.sameAsCurrent) upa('permAddress')(e) }} />
+                  onChange={e => {
+                    upa('currentAddress')(e); clearError('currentAddress')
+                    if (address.sameAsCurrent) upa('permAddress')(e)
+                  }} />
               </div>
               <div data-error={!!errors.city}>
                 <FieldLabel required>City</FieldLabel>
                 <TextInput placeholder="Ahmedabad" value={address.city} error={errors.city}
-                  onChange={e => { upa('city')(e); clearError('city'); if (address.sameAsCurrent) upa('permCity')(e) }} />
+                  onChange={e => {
+                    upa('city')(e); clearError('city')
+                    if (address.sameAsCurrent) upa('permCity')(e)
+                  }} />
               </div>
               <div data-error={!!errors.district}>
                 <FieldLabel required>District</FieldLabel>
                 <TextInput placeholder="Ahmedabad" value={address.district} error={errors.district}
-                  onChange={e => { upa('district')(e); clearError('district'); if (address.sameAsCurrent) upa('permDistrict')(e) }} />
+                  onChange={e => {
+                    upa('district')(e); clearError('district')
+                    if (address.sameAsCurrent) upa('permDistrict')(e)
+                  }} />
               </div>
               <div>
                 <FieldLabel>Landmark</FieldLabel>
                 <TextInput placeholder="Near..." value={address.landmark}
-                  onChange={e => { upa('landmark')(e); if (address.sameAsCurrent) upa('permLandmark')(e) }} />
+                  onChange={e => {
+                    upa('landmark')(e)
+                    if (address.sameAsCurrent) upa('permLandmark')(e)
+                  }} />
               </div>
             </div>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
               <div data-error={!!errors.state}>
                 <FieldLabel required>State</FieldLabel>
                 <TextInput placeholder="Gujarat" value={address.state} error={errors.state}
-                  onChange={e => { upa('state')(e); clearError('state'); if (address.sameAsCurrent) upa('permState')(e) }} />
+                  onChange={e => {
+                    upa('state')(e); clearError('state')
+                    if (address.sameAsCurrent) upa('permState')(e)
+                  }} />
               </div>
               <div data-error={!!errors.pinCode}>
                 <FieldLabel required>PIN Code</FieldLabel>
                 <TextInput placeholder="380060" value={address.pinCode} numericOnly error={errors.pinCode}
-                  onChange={e => { upa('pinCode')(e); clearError('pinCode'); if (address.sameAsCurrent) upa('permPinCode')(e) }} />
+                  onChange={e => {
+                    upa('pinCode')(e); clearError('pinCode')
+                    if (address.sameAsCurrent) upa('permPinCode')(e)
+                  }} />
               </div>
               <div data-error={!!errors.country}>
                 <FieldLabel required>Country</FieldLabel>
                 <TextInput placeholder="India" value={address.country} error={errors.country}
-                  onChange={e => { upa('country')(e); clearError('country'); if (address.sameAsCurrent) upa('permCountry')(e) }} />
+                  onChange={e => {
+                    upa('country')(e); clearError('country')
+                    if (address.sameAsCurrent) upa('permCountry')(e)
+                  }} />
               </div>
             </div>
           </SectionCard>
@@ -973,22 +1482,30 @@ export default function AddTrainee() {
             </label>
 
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
-              {[
-                { key: 'permAddress',  curKey: 'currentAddress', placeholder: 'Street / House No.' },
-                { key: 'permCity',     curKey: 'city',           placeholder: 'Ahmedabad' },
-                { key: 'permDistrict', curKey: 'district',       placeholder: 'Ahmedabad' },
-              ].map(({ key, curKey, placeholder }) => (
-                <div key={key} data-error={!!errors[key]}>
-                  <FieldLabel required={!address.sameAsCurrent}>
-                    {key === 'permAddress' ? 'Address Line' : key === 'permCity' ? 'City' : 'District'}
-                  </FieldLabel>
-                  <TextInput placeholder={placeholder}
-                    value={address.sameAsCurrent ? address[curKey] : address[key]}
-                    error={errors[key]}
-                    onChange={e => { upa(key)(e); clearError(key) }}
-                    className={address.sameAsCurrent ? 'opacity-60 pointer-events-none' : ''} />
-                </div>
-              ))}
+              <div data-error={!!errors.permAddress}>
+                <FieldLabel required={!address.sameAsCurrent}>Address Line</FieldLabel>
+                <TextInput placeholder="Street / House No."
+                  value={address.sameAsCurrent ? address.currentAddress : address.permAddress}
+                  error={errors.permAddress}
+                  onChange={e => { upa('permAddress')(e); clearError('permAddress') }}
+                  className={address.sameAsCurrent ? 'opacity-60 pointer-events-none' : ''} />
+              </div>
+              <div data-error={!!errors.permCity}>
+                <FieldLabel required={!address.sameAsCurrent}>City</FieldLabel>
+                <TextInput placeholder="Ahmedabad"
+                  value={address.sameAsCurrent ? address.city : address.permCity}
+                  error={errors.permCity}
+                  onChange={e => { upa('permCity')(e); clearError('permCity') }}
+                  className={address.sameAsCurrent ? 'opacity-60 pointer-events-none' : ''} />
+              </div>
+              <div data-error={!!errors.permDistrict}>
+                <FieldLabel required={!address.sameAsCurrent}>District</FieldLabel>
+                <TextInput placeholder="Ahmedabad"
+                  value={address.sameAsCurrent ? address.district : address.permDistrict}
+                  error={errors.permDistrict}
+                  onChange={e => { upa('permDistrict')(e); clearError('permDistrict') }}
+                  className={address.sameAsCurrent ? 'opacity-60 pointer-events-none' : ''} />
+              </div>
               <div>
                 <FieldLabel>Landmark</FieldLabel>
                 <TextInput placeholder="Near..."
@@ -998,22 +1515,30 @@ export default function AddTrainee() {
               </div>
             </div>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-              {[
-                { key: 'permState',   curKey: 'state',   placeholder: 'Ahmedabad' },
-                { key: 'permPinCode', curKey: 'pinCode', placeholder: '380060', numeric: true },
-                { key: 'permCountry', curKey: 'country', placeholder: 'India' },
-              ].map(({ key, curKey, placeholder, numeric }) => (
-                <div key={key} data-error={!!errors[key]}>
-                  <FieldLabel required={!address.sameAsCurrent}>
-                    {key === 'permState' ? 'State' : key === 'permPinCode' ? 'PIN Code' : 'Country'}
-                  </FieldLabel>
-                  <TextInput placeholder={placeholder} numericOnly={numeric}
-                    value={address.sameAsCurrent ? address[curKey] : address[key]}
-                    error={errors[key]}
-                    onChange={e => { upa(key)(e); clearError(key) }}
-                    className={address.sameAsCurrent ? 'opacity-60 pointer-events-none' : ''} />
-                </div>
-              ))}
+              <div data-error={!!errors.permState}>
+                <FieldLabel required={!address.sameAsCurrent}>State</FieldLabel>
+                <TextInput placeholder="Gujarat"
+                  value={address.sameAsCurrent ? address.state : address.permState}
+                  error={errors.permState}
+                  onChange={e => { upa('permState')(e); clearError('permState') }}
+                  className={address.sameAsCurrent ? 'opacity-60 pointer-events-none' : ''} />
+              </div>
+              <div data-error={!!errors.permPinCode}>
+                <FieldLabel required={!address.sameAsCurrent}>PIN Code</FieldLabel>
+                <TextInput placeholder="380060" numericOnly
+                  value={address.sameAsCurrent ? address.pinCode : address.permPinCode}
+                  error={errors.permPinCode}
+                  onChange={e => { upa('permPinCode')(e); clearError('permPinCode') }}
+                  className={address.sameAsCurrent ? 'opacity-60 pointer-events-none' : ''} />
+              </div>
+              <div data-error={!!errors.permCountry}>
+                <FieldLabel required={!address.sameAsCurrent}>Country</FieldLabel>
+                <TextInput placeholder="India"
+                  value={address.sameAsCurrent ? address.country : address.permCountry}
+                  error={errors.permCountry}
+                  onChange={e => { upa('permCountry')(e); clearError('permCountry') }}
+                  className={address.sameAsCurrent ? 'opacity-60 pointer-events-none' : ''} />
+              </div>
             </div>
           </div>
 
@@ -1054,8 +1579,14 @@ export default function AddTrainee() {
               </div>
             </div>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-              <div><FieldLabel>PF Number</FieldLabel><TextInput placeholder="PF number" value={bank.pfNumber} onChange={upb('pfNumber')} /></div>
-              <div><FieldLabel>UAN Number</FieldLabel><TextInput placeholder="UAN number" value={bank.uanNumber} numericOnly onChange={upb('uanNumber')} /></div>
+              <div>
+                <FieldLabel>PF Number</FieldLabel>
+                <TextInput placeholder="PF number" value={bank.pfNumber} onChange={upb('pfNumber')} />
+              </div>
+              <div>
+                <FieldLabel>UAN Number</FieldLabel>
+                <TextInput placeholder="UAN number" value={bank.uanNumber} numericOnly onChange={upb('uanNumber')} />
+              </div>
             </div>
           </SectionCard>
 
@@ -1072,60 +1603,97 @@ export default function AddTrainee() {
             ) : docTypes.length === 0 ? (
               <p className="text-sm text-gray-400 py-2">No documents configured for TRAINEE.</p>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {docTypes.map(dt => {
-                  const docKey = dt.key || dt.docKey || String(dt.id)
-                  const errKey = `doc_${docKey}`
-                  const file   = docs[docKey]
-                  const reason = docs[`reason_${docKey}`] ?? ''
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                {docTypes.map((dt, idx) => {
+                  const docKey    = dt.key || dt.docKey || String(dt.id || idx)
+                  const errKey    = `doc_${docKey}`
+                  const newFile   = documents[docKey]
+                  const reason    = docReasons[docKey] ?? ''
+                  // ✅ FIX 1: Get existing DB record for this doc type
+                  const existing  = existingDocs[docKey]
+                  const isReplacing = replacingDocs[docKey]
+
+                  // Show the existing badge unless user clicked Replace or uploaded a new file
+                  const showExistingBadge = existing?.filePath && !isReplacing && !(newFile instanceof File)
+
                   return (
                     <div key={docKey} className="flex flex-col gap-1.5">
                       <FieldLabel required={dt.mandatory}>
                         {dt.name}
-                        {dt.mandatory && <span className="ml-1.5 text-[10px] font-normal text-gray-400">(mandatory)</span>}
+                        {dt.mandatory && (
+                          <span className="ml-1.5 text-[10px] font-normal text-gray-400">(mandatory)</span>
+                        )}
                       </FieldLabel>
 
-                      <label className="relative cursor-pointer">
-                        <div className={`flex items-center h-9 px-3 bg-gray-50 border rounded-lg hover:bg-gray-100 transition-colors
-                          ${errors[errKey] ? 'border-red-400' : 'border-gray-200'}`}>
-                          <span className="text-sm text-gray-400 flex-1 truncate">
-                            {file instanceof File ? file.name : 'Choose File'}
-                          </span>
-                          <div className="w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 ml-2" style={{ backgroundColor: PRIMARY }}>
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
-                              <polyline points="17 8 12 3 7 8"/>
-                              <line x1="12" y1="3" x2="12" y2="15"/>
-                            </svg>
-                          </div>
-                        </div>
-                        <input type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png"
-                          onChange={e => {
-                            const picked = e.target.files?.[0]
-                            e.target.value = ''
-                            if (!picked) return
-                            if (!DOC_ALLOWED.includes(picked.type)) {
-                              setErrors(prev => ({ ...prev, [errKey]: `Invalid format. Allowed: ${DOC_EXT_LIST}` }))
-                              return
-                            }
-                            if (picked.size > DOC_MAX_BYTES) {
-                              setErrors(prev => ({ ...prev, [errKey]: `File too large. Max ${DOC_MAX_MB} MB` }))
-                              return
-                            }
-                            setDocs(d => ({ ...d, [docKey]: picked, [`reason_${docKey}`]: '' }))
-                            clearError(errKey)
-                          }}
+                      {/* ✅ FIX 1 + 2: Show existing doc badge with fallback icon */}
+                      {showExistingBadge ? (
+                        <ExistingDocBadge
+                          filePath={existing.filePath}
+                          onReplace={() => setReplacingDocs(r => ({ ...r, [docKey]: true }))}
                         />
-                      </label>
+                      ) : (
+                        <>
+                          <label className="relative cursor-pointer">
+                            <div className={`flex items-center h-9 px-3 bg-gray-50 border rounded-lg hover:bg-gray-100 transition-colors
+                              ${errors[errKey] ? 'border-red-400' : 'border-gray-200'}`}>
+                              <span className="text-sm text-gray-400 flex-1 truncate">
+                                {newFile instanceof File ? newFile.name : 'Choose File'}
+                              </span>
+                              <div className="w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 ml-2" style={{ backgroundColor: PRIMARY }}>
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                  <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                                  <polyline points="17 8 12 3 7 8"/>
+                                  <line x1="12" y1="3" x2="12" y2="15"/>
+                                </svg>
+                              </div>
+                            </div>
+                            <input type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png"
+                              onChange={e => {
+                                const picked = e.target.files?.[0]
+                                e.target.value = ''
+                                if (!picked) return
+                                if (!DOC_ALLOWED.includes(picked.type)) {
+                                  setErrors(prev => ({ ...prev, [errKey]: `Invalid format. Allowed: ${DOC_EXT_LIST}` }))
+                                  return
+                                }
+                                if (picked.size > DOC_MAX_BYTES) {
+                                  setErrors(prev => ({ ...prev, [errKey]: `File too large. Max ${DOC_MAX_MB} MB` }))
+                                  return
+                                }
+                                setDocuments(d => ({ ...d, [docKey]: picked }))
+                                setDocReasons(d => ({ ...d, [docKey]: '' }))
+                                // Clear the "replacing" flag once a new file is picked
+                                setReplacingDocs(r => { const n = { ...r }; delete n[docKey]; return n })
+                                clearError(errKey)
+                              }}
+                            />
+                          </label>
 
-                      <p className="text-[10px] text-gray-400 -mt-0.5">{DOC_EXT_LIST} · Max {DOC_MAX_MB} MB</p>
+                          <p className="text-[10px] text-gray-400 -mt-0.5">{DOC_EXT_LIST} · Max {DOC_MAX_MB} MB</p>
 
-                      {!(file instanceof File) && (
-                        <input type="text" placeholder="Reason if document unavailable" value={reason}
-                          onChange={e => { setDocs(d => ({ ...d, [`reason_${docKey}`]: e.target.value })); clearError(errKey) }}
-                          className={`w-full h-8 px-2.5 text-xs text-gray-600 bg-gray-50 border rounded-lg outline-none transition-colors
-                            ${errors[errKey] ? 'border-red-400' : 'border-gray-200 focus:border-[#C35E33]'}`}
-                        />
+                          {/* Cancel replace — go back to showing existing badge */}
+                          {isReplacing && existing?.filePath && !(newFile instanceof File) && (
+                            <button
+                              type="button"
+                              onClick={() => setReplacingDocs(r => { const n = { ...r }; delete n[docKey]; return n })}
+                              className="text-[10px] text-gray-400 hover:text-gray-600 text-left"
+                            >
+                              ← Keep existing document
+                            </button>
+                          )}
+
+                          {/* Reason input — only when no file uploaded and no existing doc */}
+                          {!(newFile instanceof File) && (
+                            <input type="text" placeholder="Reason if document unavailable" value={reason}
+                              onChange={e => {
+                                setDocReasons(d => ({ ...d, [docKey]: e.target.value }))
+                                clearError(errKey)
+                              }}
+                              className={`w-full h-8 px-2.5 text-xs text-gray-600 bg-gray-50 border rounded-lg outline-none transition-colors
+                                ${errors[errKey] ? 'border-red-400' : 'border-gray-200 focus:border-[#C35E33]'}`}
+                            />
+                          )}
+                        </>
                       )}
 
                       <ErrorMsg msg={errors[errKey]} />
@@ -1136,43 +1704,70 @@ export default function AddTrainee() {
             )}
           </SectionCard>
 
-          {/* ── Action Buttons ── */}
-          <div className="flex items-center justify-end gap-3 pt-2">
-            <button type="button" onClick={() => navigate('/employees')}
-              className="px-5 py-2.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
+          {/* ── FIX 4: Action Buttons — different for Add vs Edit/Draft modes ── */}
+          <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2 sm:gap-3 pt-2">
+            <button type="button" onClick={() => navigate('/employee')}
+              className="w-full sm:w-auto px-5 py-2.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors text-center">
               Cancel
             </button>
 
-            <button type="button" onClick={handleSaveDraft} disabled={submitting}
-              className="flex items-center gap-2 px-5 py-2.5 text-sm font-medium rounded-lg border-2 transition-colors disabled:opacity-50"
-              style={{ borderColor: PRIMARY, color: PRIMARY }}
-              onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#FDF5F1')}
-              onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}>
-              {submitting
-                ? <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
-                : <Save size={15} />}
-              Save as Draft
-            </button>
+            {/* ✅ FIX 4: Add mode shows "Save as Draft" + "Add Trainee" */}
+            {isAddMode && (
+              <>
+                <button type="button" onClick={handleSaveDraft} disabled={submitting}
+                  className="w-full sm:w-auto flex items-center justify-center gap-2 px-5 py-2.5 text-sm font-medium rounded-lg border-2 transition-colors disabled:opacity-50"
+                  style={{ borderColor: PRIMARY, color: PRIMARY }}
+                  onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#FDF5F1')}
+                  onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}>
+                  {submitting
+                    ? <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+                    : <Save size={15} />}
+                  Save as Draft
+                </button>
 
-            <button type="button" onClick={handleSubmitClick} disabled={submitting}
-              className="flex items-center gap-2 px-6 py-2.5 text-sm font-semibold text-white rounded-lg transition-colors disabled:opacity-60"
-              style={{ backgroundColor: '#111827' }}
-              onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#374151')}
-              onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#111827')}>
-              <UserPlus size={15} /> Add Trainee
-            </button>
+                <button type="button" onClick={handleSubmitClick} disabled={submitting}
+                  className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-2.5 text-sm font-semibold text-white rounded-lg transition-colors disabled:opacity-60"
+                  style={{ backgroundColor: '#111827' }}
+                  onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#374151')}
+                  onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#111827')}>
+                  {submitting
+                    ? <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+                    : <UserPlus size={15} />}
+                  Add Trainee
+                </button>
+              </>
+            )}
+
+            {/* ✅ FIX 4: Edit/Draft mode shows only "Update" button */}
+            {(isEditMode || isDraftMode) && (
+              <button type="button" onClick={handleUpdate} disabled={submitting}
+                className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-2.5 text-sm font-semibold text-white rounded-lg transition-colors disabled:opacity-60"
+                style={{ backgroundColor: '#111827' }}
+                onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#374151')}
+                onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#111827')}>
+                {submitting
+                  ? <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+                  : <CheckCircle size={15} />}
+                {isDraftMode ? 'Save Draft' : 'Update Trainee'}
+              </button>
+            )}
           </div>
+
         </div>
       </div>
 
-      <EmailConfirmModal
-        isOpen={showConfirm}
-        onClose={() => !submitting && setShowConfirm(false)}
-        onConfirm={handleConfirmedSubmit}
-        loading={submitting}
-        traineeName={`${personal.firstName} ${personal.lastName}`.trim()}
-        email={office.officeEmail || personal.personalEmail}
-      />
+      {/* Confirm modal only shown in Add mode */}
+      {isAddMode && (
+        <EmailConfirmModal
+          isOpen={showConfirm}
+          onClose={() => !submitting && setShowConfirm(false)}
+          onConfirm={handleConfirmedSubmit}
+          loading={submitting}
+          isEdit={false}
+          traineeName={`${personal.firstName} ${personal.lastName}`.trim()}
+          email={office.officeEmail || personal.personalEmail}
+        />
+      )}
     </>
   )
 }
