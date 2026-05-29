@@ -423,7 +423,7 @@ const [deptRes, desigRes, branchRes, docRes, shiftRes] = await Promise.allSettle
   apiClient.get('/departments',    { params: { page: 0, size: 200 } }),
   apiClient.get('/designations',   { params: { page: 0, size: 200 } }),
   apiClient.get('/branches/tree'),
-  apiClient.get('/document-types', { params: { applicableType: 'EMPLOYEE', page: 0, size: 100 } }),
+  apiClient.get('/document-types?applicableTypes=EMPLOYEE&page=0&size=100'),
   shiftService.getAll(0, 200),   // ← use existing service
 ])
         if (deptRes.status === 'fulfilled') {
@@ -1395,49 +1395,52 @@ if (Object.keys(reasonsMap).length > 0) {
   )}
 </SectionCard>
 
-          {/* ── Action Buttons ────────────────────────────────────────── */}
-          <div className="flex items-center justify-end gap-3 pt-2">
-            <button type="button" onClick={() => navigate('/employees')}
-              className="px-5 py-2.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
-              Cancel
-            </button>
+{/* ── Action Buttons ── */}
+<div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2 sm:gap-3 pt-2">
+  <button
+    type="button"
+    onClick={() => navigate('/employees')}
+    className="w-full sm:w-auto px-5 py-2.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors text-center"
+  >
+    Cancel
+  </button>
 
-            <button
-              type="button"
-              onClick={handleSaveDraft}
-              disabled={submitting}
-              className="flex items-center gap-2 px-5 py-2.5 text-sm font-medium rounded-lg border-2 transition-colors disabled:opacity-50"
-              style={{ borderColor: PRIMARY, color: PRIMARY }}
-              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#FDF5F1' }}
-              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent' }}
-            >
-              {submitting ? (
-                <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-                </svg>
-              ) : <Save size={15} />}
-              Save as Draft
-            </button>
+  <button
+    type="button"
+    onClick={handleSaveDraft}
+    disabled={submitting}
+    className="w-full sm:w-auto flex items-center justify-center gap-2 px-5 py-2.5 text-sm font-medium rounded-lg border-2 transition-colors disabled:opacity-50"
+    style={{ borderColor: PRIMARY, color: PRIMARY }}
+    onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#FDF5F1' }}
+    onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent' }}
+  >
+    {submitting ? (
+      <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
+        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+      </svg>
+    ) : <Save size={15} />}
+    Save as Draft
+  </button>
 
-            <button
-              type="button"
-              onClick={handleSubmitClick}
-              disabled={submitting}
-              className="flex items-center gap-2 px-6 py-2.5 text-sm font-semibold text-white rounded-lg transition-colors disabled:opacity-60"
-              style={{ backgroundColor: '#111827' }}
-              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#374151')}
-              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = '#111827')}
-            >
-              {submitting ? (
-                <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-                </svg>
-              ) : <UserPlus size={15} />}
-              Add Employee
-            </button>
-          </div>
+  <button
+    type="button"
+    onClick={handleSubmitClick}
+    disabled={submitting}
+    className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-2.5 text-sm font-semibold text-white rounded-lg transition-colors disabled:opacity-60"
+    style={{ backgroundColor: '#111827' }}
+    onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#374151')}
+    onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = '#111827')}
+  >
+    {submitting ? (
+      <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
+        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+      </svg>
+    ) : <UserPlus size={15} />}
+    Add Employee
+  </button>
+</div>
         </div>
       </div>
 

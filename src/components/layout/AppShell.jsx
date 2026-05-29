@@ -18,7 +18,7 @@ export default function AppShell() {
       {/* ── Sidebar ──────────────────────────────────────────────── */}
       <Sidebar />
 
-      {/* ── Toggle button — floats at the right edge of the sidebar ── */}
+      {/* ── Toggle button — floats at the right edge of the sidebar */}
       <button
         onClick={toggleSidebar}
         aria-label="Toggle sidebar"
@@ -50,7 +50,7 @@ export default function AppShell() {
         }
       </button>
 
-      {/* ── Main column: Header + scrollable content ─────────────── */}
+      {/* ── Main column: Header + scrollable content saaulig */}
       <div className="flex flex-col flex-1 overflow-hidden min-w-0">
         <Header />
 

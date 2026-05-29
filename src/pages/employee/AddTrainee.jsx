@@ -1,12 +1,5 @@
 // src/pages/employee/AddTrainee.jsx
-// ─────────────────────────────────────────────────────────────────────────────
-// Full trainee creation form with:
-//   • All fields mandatory (matching AddEmployee quality)
-//   • Searchable dropdowns for department, designation, branch (from API)
-//   • Draft + Submit flow with email confirmation modal
-//   • Dynamic document types from backend (filtered by TRAINEE)
-//   • Same UI patterns as AddEmployee.jsx
-// ─────────────────────────────────────────────────────────────────────────────
+
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Mail, Save, UserPlus } from 'lucide-react'
@@ -14,6 +7,7 @@ import { useToast } from '@/components/shared/toast/ToastProvider'
 import SearchableSelect from '@/components/shared/SearchableSelect'
 import employeeService from '@/services/employeeService'
 import apiClient from '@/services/apiClient'
+import shiftService from '@/services/shiftService'
 
 const PRIMARY = '#C35E33'
 
@@ -53,7 +47,6 @@ function validateEmail(value, fieldName) {
 function buildErrors(p, office, training, edu, addr, bank, docs, docTypes) {
   const errs = {}
 
-  // ── Personal ──────────────────────────────────────────────────────────────
   if (!p.firstName.trim())   errs.firstName     = 'First name is required'
   if (!p.middleName.trim())  errs.middleName    = 'Middle name is required'
   if (!p.lastName.trim())    errs.lastName      = 'Last name is required'
@@ -72,16 +65,15 @@ function buildErrors(p, office, training, edu, addr, bank, docs, docTypes) {
   const emailErr = validateEmail(p.personalEmail, 'Personal email')
   if (emailErr) errs.personalEmail = emailErr
 
-  // ── Office ────────────────────────────────────────────────────────────────
-  if (!office.designation.trim())  errs.designation   = 'Designation is required'
-  if (!office.department.trim())   errs.department    = 'Department is required'
-  if (!office.officeEmail.trim())  errs.officeEmail   = 'Office email is required'
+  if (!office.designationId)       errs.designation  = 'Designation is required'
+  if (!office.departmentId)        errs.department   = 'Department is required'
+  if (!office.workLocationId)      errs.workLocation = 'Branch / work location is required'
+  if (!office.shiftId)             errs.shiftId      = 'Shift is required'
+  if (!office.officeEmail.trim())  errs.officeEmail  = 'Office email is required'
   else if (!EMAIL_RE.test(office.officeEmail)) errs.officeEmail = 'Office email is not valid'
-  if (!office.workLocation.trim()) errs.workLocation  = 'Branch / work location is required'
 
-  // ── Training ──────────────────────────────────────────────────────────────
-  if (!training.startDate)        errs.startDate        = 'Training start date is required'
-  if (!training.endDate)          errs.endDate          = 'Training end date is required'
+  if (!training.startDate) errs.startDate = 'Training start date is required'
+  if (!training.endDate)   errs.endDate   = 'Training end date is required'
   if (training.startDate && training.endDate && training.endDate < training.startDate)
     errs.endDate = 'End date cannot be before start date'
   if (!training.trainingPeriodMonths)
@@ -89,18 +81,16 @@ function buildErrors(p, office, training, edu, addr, bank, docs, docTypes) {
   if (!training.stipend || isNaN(training.stipend) || Number(training.stipend) < 0)
     errs.stipend = 'Stipend is required (0 for unpaid)'
 
-  // ── Education ─────────────────────────────────────────────────────────────
-  if (!edu.hscCompletion.trim())    errs.hscCompletion    = '12th completion is required'
-  if (!edu.hscYear)                 errs.hscYear          = '12th year is required'
+  if (!edu.hscCompletion.trim())      errs.hscCompletion      = '12th completion is required'
+  if (!edu.hscYear)                   errs.hscYear            = '12th year is required'
   if (!edu.bachelorCompletion.trim()) errs.bachelorCompletion = 'Bachelor completion is required'
-  if (!edu.bachelorYear)            errs.bachelorYear     = 'Bachelor year is required'
-  if (!edu.degreeName.trim())       errs.degreeName       = 'Degree name is required'
-  if (!edu.degreeResult.trim())     errs.degreeResult     = 'Degree result is required'
-  if (!edu.universityName.trim())   errs.universityName   = 'University name is required'
-  if (!edu.universityAddress.trim()) errs.universityAddress = 'University address is required'
-  if (!edu.trainingStatus)          errs.trainingStatus   = 'Training completion status is required'
+  if (!edu.bachelorYear)              errs.bachelorYear       = 'Bachelor year is required'
+  if (!edu.degreeName.trim())         errs.degreeName         = 'Degree name is required'
+  if (!edu.degreeResult.trim())       errs.degreeResult       = 'Degree result is required'
+  if (!edu.universityName.trim())     errs.universityName     = 'University name is required'
+  if (!edu.universityAddress.trim())  errs.universityAddress  = 'University address is required'
+  if (!edu.trainingStatus)            errs.trainingStatus     = 'Training completion status is required'
 
-  // ── Current address ────────────────────────────────────────────────────────
   if (!addr.currentAddress.trim()) errs.currentAddress = 'Current address is required'
   if (!addr.city.trim())           errs.city           = 'City is required'
   if (!addr.district.trim())       errs.district       = 'District is required'
@@ -109,7 +99,6 @@ function buildErrors(p, office, training, edu, addr, bank, docs, docTypes) {
   else if (!/^\d{6}$/.test(addr.pinCode)) errs.pinCode = 'PIN code must be 6 digits'
   if (!addr.country.trim())        errs.country        = 'Country is required'
 
-  // ── Permanent address ──────────────────────────────────────────────────────
   if (!addr.sameAsCurrent) {
     if (!addr.permAddress.trim())  errs.permAddress  = 'Permanent address is required'
     if (!addr.permCity.trim())     errs.permCity     = 'City is required'
@@ -120,7 +109,6 @@ function buildErrors(p, office, training, edu, addr, bank, docs, docTypes) {
     if (!addr.permCountry.trim())  errs.permCountry  = 'Country is required'
   }
 
-  // ── Bank & Legal ───────────────────────────────────────────────────────────
   if (!bank.bankName.trim())      errs.bankName      = 'Bank name is required'
   if (!bank.accountNumber.trim()) errs.accountNumber = 'Account number is required'
   if (!bank.ifscCode.trim())      errs.ifscCode      = 'IFSC code is required'
@@ -131,18 +119,19 @@ function buildErrors(p, office, training, edu, addr, bank, docs, docTypes) {
   else if (!ADHAR_RE.test(bank.aadhaarNumber.replace(/\s/g, ''))) errs.aadhaarNumber = 'Aadhaar must be exactly 12 digits'
 
   docTypes.forEach(dt => {
-  if (dt.mandatory) {
-    const key       = dt.key || dt.docKey || String(dt.id)
-    const hasFile   = docs[key] instanceof File
-    const hasReason = docs[`reason_${key}`]?.trim()
-    if (!hasFile && !hasReason)
-      errs[`doc_${key}`] = `${dt.name} is required (upload file or provide reason)`
-  }
-})
+    if (dt.mandatory) {
+      const key     = dt.key || dt.docKey || String(dt.id)
+      const hasFile = docs[key] instanceof File
+      const hasReason = docs[`reason_${key}`]?.trim()
+      if (!hasFile && !hasReason)
+        errs[`doc_${key}`] = `${dt.name} is required (upload file or provide reason)`
+    }
+  })
+
   return errs
 }
 
-// ─── Shared primitives ─────────────────────────────────────────────────────────
+// ─── Shared primitives ────────────────────────────────────────────────────────
 function FieldLabel({ children, required }) {
   return (
     <label className="block text-xs font-medium text-gray-500 mb-1">
@@ -236,6 +225,7 @@ function SectionCard({ title, children, className = '' }) {
       {children}
     </div>
   )
+  
 }
 
 // ─── Email Confirmation Modal ─────────────────────────────────────────────────
@@ -286,10 +276,10 @@ function EmailConfirmModal({ isOpen, onClose, onConfirm, loading, traineeName, e
 }
 
 const STATUS_TO_API = { Active: 'ACTIVE', Inactive: 'INACTIVE', 'On Hold': 'ON_HOLD' }
-const PERIODS = ['1 month', '2 months', '3 months', '6 months', '1 year']
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const YEARS   = Array.from({ length: 15 }, (_, i) => String(2012 + i))
 
-// ─── Main Page ─────────────────────────────────────────────────────────────────
+// ─── Main Page ────────────────────────────────────────────────────────────────
 export default function AddTrainee() {
   const navigate  = useNavigate()
   const { toast } = useToast()
@@ -298,15 +288,17 @@ export default function AddTrainee() {
   const [submitting,  setSubmitting]  = useState(false)
   const [showConfirm, setShowConfirm] = useState(false)
 
-  // ── Dropdown options ───────────────────────────────────────────────────────
-  const [departments,  setDepartments]  = useState([])
-  const [designations, setDesignations] = useState([])
-  const [branches,     setBranches]     = useState([])
-  const [docTypes,     setDocTypes]     = useState([])
-  const [deptLoading,  setDeptLoading]  = useState(true)
-  const [desigLoading, setDesigLoading] = useState(true)
-  const [branchLoading,setBranchLoading]= useState(true)
-  const [docLoading,   setDocLoading]   = useState(true)
+  // ── Dropdown state ─────────────────────────────────────────────────────────
+  const [departments,   setDepartments]   = useState([])
+  const [designations,  setDesignations]  = useState([])
+  const [branches,      setBranches]      = useState([])
+  const [shifts,        setShifts]        = useState([])
+  const [docTypes,      setDocTypes]      = useState([])
+  const [deptLoading,   setDeptLoading]   = useState(true)
+  const [desigLoading,  setDesigLoading]  = useState(true)
+  const [branchLoading, setBranchLoading] = useState(true)
+  const [shiftLoading,  setShiftLoading]  = useState(true)
+  const [docLoading,    setDocLoading]    = useState(true)
 
   // ── Form state ─────────────────────────────────────────────────────────────
   const [personal, setPersonal] = useState({
@@ -315,10 +307,11 @@ export default function AddTrainee() {
     maritalStatus: '', spouseName: '', profilePhoto: null,
   })
   const [office, setOffice] = useState({
-    designation: '', designationId: '',
-    department: '', departmentId: '',
+    designation: '', designationId: null,
+    department: '',  departmentId: null,
     officeEmail: '',
-    workLocation: '', workLocationId: '',
+    workLocation: '', workLocationId: null,
+    shiftId: null,   shiftName: '',
   })
   const [training, setTraining] = useState({
     startDate: '', endDate: '',
@@ -346,57 +339,73 @@ export default function AddTrainee() {
     panNumber: '', aadhaarNumber: '', pfNumber: '',
     uanNumber: '', esicNumber: '',
   })
-  // { [docKey]: File, [`reason_${docKey}`]: 'string' }
   const [docs, setDocs] = useState({})
 
   // ── Load dropdowns ─────────────────────────────────────────────────────────
-useEffect(() => {
-  const load = async () => {
-    try {
-      const [deptRes, desigRes, branchRes, docRes] = await Promise.allSettled([
-        apiClient.get('/departments',  { params: { page: 0, size: 200 } }),
-        apiClient.get('/designations', { params: { page: 0, size: 200 } }),
-        apiClient.get('/branches',     { params: { page: 0, size: 200 } }),
-      
-        apiClient.get('/document-types', {
-          params: { applicableType: 'TRAINEE', page: 0, size: 100 }
-        }),
-      ])
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const [deptRes, desigRes, branchRes, docRes, shiftRes] = await Promise.allSettled([
+          apiClient.get('/departments',    { params: { page: 0, size: 200 } }),
+          apiClient.get('/designations',   { params: { page: 0, size: 200 } }),
+          apiClient.get('/branches',       { params: { page: 0, size: 200 } }),
+          apiClient.get('/document-types?applicableTypes=TRAINEE&page=0&size=100'),
+          shiftService.getAll(0, 200),
+        ])
 
-      if (deptRes.status === 'fulfilled') {
-        const d = deptRes.value?.data?.data ?? deptRes.value?.data ?? {}
-        setDepartments((d.content ?? d).filter(x => x.status !== false))
+        if (deptRes.status === 'fulfilled') {
+          const d = deptRes.value?.data?.data ?? deptRes.value?.data ?? {}
+          setDepartments((d.content ?? d).filter(x => x.status !== false))
+        } else {
+          console.error('Failed to load departments:', deptRes.reason)
+        }
+
+        if (desigRes.status === 'fulfilled') {
+          const d = desigRes.value?.data?.data ?? desigRes.value?.data ?? {}
+          setDesignations((d.content ?? d).filter(x => x.active !== false))
+        } else {
+          console.error('Failed to load designations:', desigRes.reason)
+        }
+
+        if (branchRes.status === 'fulfilled') {
+          const d = branchRes.value?.data?.data ?? branchRes.value?.data ?? {}
+          setBranches((d.content ?? d).filter(x => x.active !== false))
+        } else {
+          console.error('Failed to load branches:', branchRes.reason)
+        }
+
+        if (shiftRes.status === 'fulfilled') {
+          const d = shiftRes.value?.data?.data ?? shiftRes.value?.data ?? {}
+          setShifts((d.content ?? []).filter(x => x.isActive !== false))
+        } else {
+          console.error('Failed to load shifts:', shiftRes.reason)
+        }
+
+        if (docRes.status === 'fulfilled') {
+          const d = docRes.value?.data?.data ?? docRes.value?.data ?? {}
+          const activeDocs = (d.content ?? d ?? []).filter(x => x.active !== false)
+          const seen   = new Set()
+          const unique = activeDocs.filter(dt => {
+            const key = dt.key || dt.docKey || String(dt.id)
+            if (seen.has(key)) return false
+            seen.add(key)
+            return true
+          })
+          setDocTypes(unique)
+        } else {
+          console.error('Failed to load document types:', docRes.reason)
+        }
+
+      } finally {
+        setDeptLoading(false)
+        setDesigLoading(false)
+        setBranchLoading(false)
+        setShiftLoading(false)
+        setDocLoading(false)
       }
-      if (desigRes.status === 'fulfilled') {
-        const d = desigRes.value?.data?.data ?? desigRes.value?.data ?? {}
-        setDesignations((d.content ?? d).filter(x => x.active !== false))
-      }
-      if (branchRes.status === 'fulfilled') {
-        const d = branchRes.value?.data?.data ?? branchRes.value?.data ?? {}
-        setBranches((d.content ?? d).filter(x => x.active !== false))
-      }
-      if (docRes.status === 'fulfilled') {
-        const d = docRes.value?.data?.data ?? docRes.value?.data ?? {}
-    
-        const activeDocs = (d.content ?? d ?? []).filter(x => x.active !== false)
-        const seen   = new Set()
-        const unique = activeDocs.filter(dt => {
-const key = dt.key || dt.docKey || String(dt.id)
-          if (seen.has(key)) return false
-          seen.add(key)
-          return true
-        })
-        setDocTypes(unique)
-      }
-    } finally {
-      setDeptLoading(false)
-      setDesigLoading(false)
-      setBranchLoading(false)
-      setDocLoading(false)
     }
-  }
-  load()
-}, [])
+    load()
+  }, [])
 
   // ── Helpers ────────────────────────────────────────────────────────────────
   const up  = f => e => setPersonal(p  => ({ ...p,  [f]: e.target?.value ?? e }))
@@ -406,7 +415,7 @@ const key = dt.key || dt.docKey || String(dt.id)
   const upa = f => e => setAddress(a  => ({ ...a,   [f]: e.target?.value ?? e }))
   const upb = f => e => setBank(b     => ({ ...b,   [f]: e.target?.value ?? e }))
 
-  const clearError  = k    => setErrors(p => { const n = { ...p }; delete n[k]; return n })
+  const clearError  = k      => setErrors(p => { const n = { ...p }; delete n[k]; return n })
   const clearErrors = (...ks) => setErrors(p => { const n = { ...p }; ks.forEach(k => delete n[k]); return n })
 
   const handleSameAsCurrent = (checked) => {
@@ -437,12 +446,13 @@ const key = dt.key || dt.docKey || String(dt.id)
       personalEmail:      personal.personalEmail.trim() || null,
       officeEmail:        office.officeEmail.trim() || null,
       workProfile: {
-        designationName: office.designation.trim() || null,
-        departmentName:  office.department.trim()  || null,
-        branchName:      office.workLocation.trim()|| null,
-        workMode:        training.workMode.toUpperCase().replace(/[\s-]+/g, '_'),
-        workingType:     training.workingType.toUpperCase().replace(/[\s-]+/g, '_'),
-        status:          STATUS_TO_API[training.status] || 'ACTIVE',
+        departmentId:  office.departmentId   || null,
+        designationId: office.designationId  || null,
+        branchId:      office.workLocationId || null,
+        shiftId:       office.shiftId        || null,
+        workMode:      training.workMode.toUpperCase().replace(/[\s-]+/g, '_'),
+        workingType:   training.workingType.toUpperCase().replace(/[\s-]+/g, '_'),
+        status:        STATUS_TO_API[training.status] || 'ACTIVE',
       },
       address: {
         currentAddress: {
@@ -482,22 +492,22 @@ const key = dt.key || dt.docKey || String(dt.id)
         startDate:            training.startDate  || null,
         endDate:              training.endDate    || null,
         trainingPeriodMonths: training.trainingPeriodMonths !== '' ? Number(training.trainingPeriodMonths) : null,
-        stipend:              training.stipend    !== '' ? Number(training.stipend)    : null,
+        stipend:              training.stipend !== '' ? Number(training.stipend) : null,
         workMode:             training.workMode.toUpperCase().replace(/[\s-]+/g, '_'),
         workingType:          training.workingType.toUpperCase().replace(/[\s-]+/g, '_'),
       },
       educationDetails: {
-        hscCompletion:           edu.hscCompletion.trim()       || null,
-        hscYear:                 edu.hscYear     ? Number(edu.hscYear)     : null,
-        bachelorCompletion:      edu.bachelorCompletion.trim()  || null,
-        bachelorYear:            edu.bachelorYear? Number(edu.bachelorYear): null,
-        masterCompletion:        edu.masterCompletion.trim()    || null,
-        masterYear:              edu.masterYear  ? Number(edu.masterYear)  : null,
-        degreeName:              edu.degreeName.trim()          || null,
-        degreeResult:            edu.degreeResult.trim()        || null,
-        universityName:          edu.universityName.trim()      || null,
-        universityAddress:       edu.universityAddress.trim()   || null,
-        trainingCompletionStatus:edu.trainingStatus             || null,
+        hscCompletion:            edu.hscCompletion.trim()      || null,
+        hscYear:                  edu.hscYear      ? Number(edu.hscYear)      : null,
+        bachelorCompletion:       edu.bachelorCompletion.trim() || null,
+        bachelorYear:             edu.bachelorYear ? Number(edu.bachelorYear) : null,
+        masterCompletion:         edu.masterCompletion.trim()   || null,
+        masterYear:               edu.masterYear   ? Number(edu.masterYear)   : null,
+        degreeName:               edu.degreeName.trim()         || null,
+        degreeResult:             edu.degreeResult.trim()       || null,
+        universityName:           edu.universityName.trim()     || null,
+        universityAddress:        edu.universityAddress.trim()  || null,
+        trainingCompletionStatus: edu.trainingStatus            || null,
       },
     }
 
@@ -507,18 +517,17 @@ const key = dt.key || dt.docKey || String(dt.id)
 
     if (personal.profilePhoto) fd.append('profileImage', personal.profilePhoto)
 
-    // Dynamic documents
     const reasonsMap = {}
-docTypes.forEach(dt => {
-  const key    = dt.key || dt.docKey || String(dt.id)
-  const file   = docs[key]
-  const reason = docs[`reason_${key}`]
-  if (file instanceof File) fd.append(key, file)
-  if (reason?.trim()) reasonsMap[key] = reason.trim()
-})
-if (Object.keys(reasonsMap).length > 0) {
-  fd.append('reasons', JSON.stringify(reasonsMap))
-}
+    docTypes.forEach(dt => {
+      const key    = dt.key || dt.docKey || String(dt.id)
+      const file   = docs[key]
+      const reason = docs[`reason_${key}`]
+      if (file instanceof File) fd.append(key, file)
+      if (reason?.trim()) reasonsMap[key] = reason.trim()
+    })
+    if (Object.keys(reasonsMap).length > 0) {
+      fd.append('reasons', JSON.stringify(reasonsMap))
+    }
 
     return fd
   }, [personal, office, training, edu, address, bank, docs, docTypes])
@@ -659,7 +668,8 @@ if (Object.keys(reasonsMap).length > 0) {
                 <SelectInput value={personal.maritalStatus} error={errors.maritalStatus}
                   onChange={e => { up('maritalStatus')(e); clearError('maritalStatus') }}>
                   <option value="">Select Status</option>
-                  <option>Single</option><option>Married</option><option>Divorced</option><option>Widowed</option>
+                  <option>Single</option><option>Married</option>
+                  <option>Divorced</option><option>Widowed</option>
                 </SelectInput>
               </div>
               <div data-error={!!errors.spouseName}>
@@ -676,36 +686,61 @@ if (Object.keys(reasonsMap).length > 0) {
                   onChange={f => { setPersonal(p => ({ ...p, profilePhoto: f })); clearError('profilePhoto') }} />
               </div>
             </div>
-          </SectionCard>
+          </SectionCard>   
 
           {/* ── Office / Work Profile ── */}
           <SectionCard title="Office Information">
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-3">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
               <div data-error={!!errors.designation}>
                 <FieldLabel required>Designation</FieldLabel>
                 <SearchableSelect
                   value={office.designation} options={designations}
-                  labelKey="name" valueKey="name" placeholder="Select designation…"
+                  labelKey="name" valueKey="name"
+                  placeholder={desigLoading ? 'Loading…' : 'Select designation…'}
                   loading={desigLoading} error={errors.designation}
-                  onChange={opt => { setOffice(o => ({ ...o, designation: opt.name, designationId: opt.id })); clearError('designation') }}
+                  onChange={opt => {
+                    setOffice(o => ({ ...o, designation: opt?.name ?? '', designationId: opt?.id ?? null }))
+                    clearError('designation')
+                  }}
                 />
               </div>
               <div data-error={!!errors.department}>
                 <FieldLabel required>Department</FieldLabel>
                 <SearchableSelect
                   value={office.department} options={departments}
-                  labelKey="name" valueKey="name" placeholder="Select department…"
+                  labelKey="name" valueKey="name"
+                  placeholder={deptLoading ? 'Loading…' : 'Select department…'}
                   loading={deptLoading} error={errors.department}
-                  onChange={opt => { setOffice(o => ({ ...o, department: opt.name, departmentId: opt.id })); clearError('department') }}
+                  onChange={opt => {
+                    setOffice(o => ({ ...o, department: opt?.name ?? '', departmentId: opt?.id ?? null }))
+                    clearError('department')
+                  }}
                 />
               </div>
               <div data-error={!!errors.workLocation}>
                 <FieldLabel required>Branch / Work Location</FieldLabel>
                 <SearchableSelect
                   value={office.workLocation} options={branches}
-                  labelKey="branchName" valueKey="branchName" placeholder="Select branch…"
+                  labelKey="branchName" valueKey="branchName"
+                  placeholder={branchLoading ? 'Loading…' : 'Select branch…'}
                   loading={branchLoading} error={errors.workLocation}
-                  onChange={opt => { setOffice(o => ({ ...o, workLocation: opt.branchName, workLocationId: opt.id })); clearError('workLocation') }}
+                  onChange={opt => {
+                    setOffice(o => ({ ...o, workLocation: opt?.branchName ?? '', workLocationId: opt?.id ?? null }))
+                    clearError('workLocation')
+                  }}
+                />
+              </div>
+              <div data-error={!!errors.shiftId}>
+                <FieldLabel required>Shift</FieldLabel>
+                <SearchableSelect
+                  value={office.shiftName} options={shifts}
+                  labelKey="shiftName" valueKey="id"
+                  placeholder={shiftLoading ? 'Loading…' : 'Select shift…'}
+                  loading={shiftLoading} error={errors.shiftId}
+                  onChange={opt => {
+                    setOffice(o => ({ ...o, shiftName: opt?.shiftName ?? '', shiftId: opt?.id ?? null }))
+                    clearError('shiftId')
+                  }}
                 />
               </div>
             </div>
@@ -779,14 +814,13 @@ if (Object.keys(reasonsMap).length > 0) {
 
           {/* ── Educational Details ── */}
           <SectionCard title="Educational Details">
-            {/* 12th / HSC */}
             <div className="grid grid-cols-2 gap-3 mb-3">
               <div data-error={!!errors.hscCompletion}>
                 <FieldLabel required>12th (HSC) Completion</FieldLabel>
                 <SelectInput value={edu.hscCompletion} error={errors.hscCompletion}
                   onChange={e => { upe('hscCompletion')(e); clearError('hscCompletion') }}>
                   <option value="">Select…</option>
-                  {PERIODS.map(p => <option key={p}>{p}</option>)}
+                  {MONTHS.map(p => <option key={p}>{p}</option>)}
                 </SelectInput>
               </div>
               <div data-error={!!errors.hscYear}>
@@ -799,14 +833,13 @@ if (Object.keys(reasonsMap).length > 0) {
               </div>
             </div>
 
-            {/* Bachelor */}
             <div className="grid grid-cols-2 gap-3 mb-3">
               <div data-error={!!errors.bachelorCompletion}>
                 <FieldLabel required>Bachelor Degree Completion</FieldLabel>
                 <SelectInput value={edu.bachelorCompletion} error={errors.bachelorCompletion}
                   onChange={e => { upe('bachelorCompletion')(e); clearError('bachelorCompletion') }}>
                   <option value="">Select…</option>
-                  {PERIODS.map(p => <option key={p}>{p}</option>)}
+                  {MONTHS.map(p => <option key={p}>{p}</option>)}
                 </SelectInput>
               </div>
               <div data-error={!!errors.bachelorYear}>
@@ -819,13 +852,12 @@ if (Object.keys(reasonsMap).length > 0) {
               </div>
             </div>
 
-            {/* Master (optional) */}
             <div className="grid grid-cols-2 gap-3 mb-3">
               <div>
                 <FieldLabel>Master Degree Completion</FieldLabel>
                 <SelectInput value={edu.masterCompletion} onChange={upe('masterCompletion')}>
                   <option value="">Select…</option>
-                  {PERIODS.map(p => <option key={p}>{p}</option>)}
+                  {MONTHS.map(p => <option key={p}>{p}</option>)}
                 </SelectInput>
               </div>
               <div>
@@ -837,7 +869,6 @@ if (Object.keys(reasonsMap).length > 0) {
               </div>
             </div>
 
-            {/* Degree + Result */}
             <div className="grid grid-cols-2 gap-3 mb-3">
               <div data-error={!!errors.degreeName}>
                 <FieldLabel required>Degree Name</FieldLabel>
@@ -851,22 +882,20 @@ if (Object.keys(reasonsMap).length > 0) {
               </div>
             </div>
 
-            {/* University */}
             <div className="grid grid-cols-2 gap-3 mb-3">
               <div data-error={!!errors.universityName}>
                 <FieldLabel required>University Name</FieldLabel>
-                <TextInput placeholder="Shivaji University" value={edu.universityName} error={errors.universityName}
+                <TextInput placeholder="ABC University" value={edu.universityName} error={errors.universityName}
                   onChange={e => { upe('universityName')(e); clearError('universityName') }} />
               </div>
               <div data-error={!!errors.universityAddress}>
                 <FieldLabel required>University Address</FieldLabel>
-                <TextInput placeholder="Kolhapur, Maharashtra" value={edu.universityAddress}
+                <TextInput placeholder="Ahmedabad, Gujarat" value={edu.universityAddress}
                   error={errors.universityAddress}
                   onChange={e => { upe('universityAddress')(e); clearError('universityAddress') }} />
               </div>
             </div>
 
-            {/* Training completion status */}
             <div data-error={!!errors.trainingStatus}>
               <FieldLabel required>Training Completion Status</FieldLabel>
               <div className="flex items-center gap-5 mt-1">
@@ -887,26 +916,17 @@ if (Object.keys(reasonsMap).length > 0) {
               <div data-error={!!errors.currentAddress}>
                 <FieldLabel required>Address Line</FieldLabel>
                 <TextInput placeholder="Street / House No." value={address.currentAddress} error={errors.currentAddress}
-                  onChange={e => {
-                    upa('currentAddress')(e); clearError('currentAddress')
-                    if (address.sameAsCurrent) upa('permAddress')(e)
-                  }} />
+                  onChange={e => { upa('currentAddress')(e); clearError('currentAddress'); if (address.sameAsCurrent) upa('permAddress')(e) }} />
               </div>
               <div data-error={!!errors.city}>
                 <FieldLabel required>City</FieldLabel>
-                <TextInput placeholder="Kolhapur" value={address.city} error={errors.city}
-                  onChange={e => {
-                    upa('city')(e); clearError('city')
-                    if (address.sameAsCurrent) upa('permCity')(e)
-                  }} />
+                <TextInput placeholder="Ahmedabad" value={address.city} error={errors.city}
+                  onChange={e => { upa('city')(e); clearError('city'); if (address.sameAsCurrent) upa('permCity')(e) }} />
               </div>
               <div data-error={!!errors.district}>
                 <FieldLabel required>District</FieldLabel>
-                <TextInput placeholder="Kolhapur" value={address.district} error={errors.district}
-                  onChange={e => {
-                    upa('district')(e); clearError('district')
-                    if (address.sameAsCurrent) upa('permDistrict')(e)
-                  }} />
+                <TextInput placeholder="Ahmedabad" value={address.district} error={errors.district}
+                  onChange={e => { upa('district')(e); clearError('district'); if (address.sameAsCurrent) upa('permDistrict')(e) }} />
               </div>
               <div>
                 <FieldLabel>Landmark</FieldLabel>
@@ -917,27 +937,18 @@ if (Object.keys(reasonsMap).length > 0) {
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
               <div data-error={!!errors.state}>
                 <FieldLabel required>State</FieldLabel>
-                <TextInput placeholder="Maharashtra" value={address.state} error={errors.state}
-                  onChange={e => {
-                    upa('state')(e); clearError('state')
-                    if (address.sameAsCurrent) upa('permState')(e)
-                  }} />
+                <TextInput placeholder="Gujarat" value={address.state} error={errors.state}
+                  onChange={e => { upa('state')(e); clearError('state'); if (address.sameAsCurrent) upa('permState')(e) }} />
               </div>
               <div data-error={!!errors.pinCode}>
                 <FieldLabel required>PIN Code</FieldLabel>
-                <TextInput placeholder="416001" value={address.pinCode} numericOnly error={errors.pinCode}
-                  onChange={e => {
-                    upa('pinCode')(e); clearError('pinCode')
-                    if (address.sameAsCurrent) upa('permPinCode')(e)
-                  }} />
+                <TextInput placeholder="380060" value={address.pinCode} numericOnly error={errors.pinCode}
+                  onChange={e => { upa('pinCode')(e); clearError('pinCode'); if (address.sameAsCurrent) upa('permPinCode')(e) }} />
               </div>
               <div data-error={!!errors.country}>
                 <FieldLabel required>Country</FieldLabel>
                 <TextInput placeholder="India" value={address.country} error={errors.country}
-                  onChange={e => {
-                    upa('country')(e); clearError('country')
-                    if (address.sameAsCurrent) upa('permCountry')(e)
-                  }} />
+                  onChange={e => { upa('country')(e); clearError('country'); if (address.sameAsCurrent) upa('permCountry')(e) }} />
               </div>
             </div>
           </SectionCard>
@@ -963,18 +974,16 @@ if (Object.keys(reasonsMap).length > 0) {
 
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
               {[
-                { key: 'permAddress',  placeholder: 'Street / House No.' },
-                { key: 'permCity',     placeholder: 'Kolhapur' },
-                { key: 'permDistrict', placeholder: 'Kolhapur' },
-              ].map(({ key, placeholder }) => (
-                <div key={key}>
+                { key: 'permAddress',  curKey: 'currentAddress', placeholder: 'Street / House No.' },
+                { key: 'permCity',     curKey: 'city',           placeholder: 'Ahmedabad' },
+                { key: 'permDistrict', curKey: 'district',       placeholder: 'Ahmedabad' },
+              ].map(({ key, curKey, placeholder }) => (
+                <div key={key} data-error={!!errors[key]}>
                   <FieldLabel required={!address.sameAsCurrent}>
                     {key === 'permAddress' ? 'Address Line' : key === 'permCity' ? 'City' : 'District'}
                   </FieldLabel>
                   <TextInput placeholder={placeholder}
-                    value={address.sameAsCurrent
-                      ? address[key === 'permAddress' ? 'currentAddress' : key === 'permCity' ? 'city' : 'district']
-                      : address[key]}
+                    value={address.sameAsCurrent ? address[curKey] : address[key]}
                     error={errors[key]}
                     onChange={e => { upa(key)(e); clearError(key) }}
                     className={address.sameAsCurrent ? 'opacity-60 pointer-events-none' : ''} />
@@ -990,11 +999,11 @@ if (Object.keys(reasonsMap).length > 0) {
             </div>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
               {[
-                { key: 'permState',   curKey: 'state',   placeholder: 'Maharashtra' },
-                { key: 'permPinCode', curKey: 'pinCode', placeholder: '416001', numeric: true },
+                { key: 'permState',   curKey: 'state',   placeholder: 'Ahmedabad' },
+                { key: 'permPinCode', curKey: 'pinCode', placeholder: '380060', numeric: true },
                 { key: 'permCountry', curKey: 'country', placeholder: 'India' },
               ].map(({ key, curKey, placeholder, numeric }) => (
-                <div key={key}>
+                <div key={key} data-error={!!errors[key]}>
                   <FieldLabel required={!address.sameAsCurrent}>
                     {key === 'permState' ? 'State' : key === 'permPinCode' ? 'PIN Code' : 'Country'}
                   </FieldLabel>
@@ -1050,7 +1059,7 @@ if (Object.keys(reasonsMap).length > 0) {
             </div>
           </SectionCard>
 
-          {/* ── Documents (dynamic, TRAINEE-filtered) ── */}
+          {/* ── Documents ── */}
           <SectionCard title="Documents">
             {docLoading ? (
               <div className="flex items-center gap-2 text-sm text-gray-400 py-4">
@@ -1061,91 +1070,68 @@ if (Object.keys(reasonsMap).length > 0) {
                 Loading required documents…
               </div>
             ) : docTypes.length === 0 ? (
-              <p className="text-sm text-gray-400 py-2">No documents configured for TRAINEE. Ask admin to add document types.</p>
+              <p className="text-sm text-gray-400 py-2">No documents configured for TRAINEE.</p>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-{docTypes.map(dt => {
-  const docKey = dt.key || dt.docKey || String(dt.id)
-  const errKey = `doc_${docKey}`
-  const file   = docs[docKey]
-  const reason = docs[`reason_${docKey}`] ?? ''
-  return (
-    <div key={docKey} className="flex flex-col gap-1.5">
-      <FieldLabel required={dt.mandatory}>
-        {dt.name}
-        {dt.mandatory && (
-          <span className="ml-1.5 text-[10px] font-normal text-gray-400">(mandatory)</span>
-        )}
-      </FieldLabel>
+                {docTypes.map(dt => {
+                  const docKey = dt.key || dt.docKey || String(dt.id)
+                  const errKey = `doc_${docKey}`
+                  const file   = docs[docKey]
+                  const reason = docs[`reason_${docKey}`] ?? ''
+                  return (
+                    <div key={docKey} className="flex flex-col gap-1.5">
+                      <FieldLabel required={dt.mandatory}>
+                        {dt.name}
+                        {dt.mandatory && <span className="ml-1.5 text-[10px] font-normal text-gray-400">(mandatory)</span>}
+                      </FieldLabel>
 
-      {/* File upload with inline validation */}
-      <label className="relative cursor-pointer">
-        <div className={`flex items-center h-9 px-3 bg-gray-50 border rounded-lg hover:bg-gray-100 transition-colors
-          ${errors[errKey] ? 'border-red-400' : 'border-gray-200'}`}>
-          <span className="text-sm text-gray-400 flex-1 truncate">
-            {file instanceof File ? file.name : 'Choose File'}
-          </span>
-          <div className="w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 ml-2"
-            style={{ backgroundColor: PRIMARY }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white"
-              strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
-              <polyline points="17 8 12 3 7 8"/>
-              <line x1="12" y1="3" x2="12" y2="15"/>
-            </svg>
-          </div>
-        </div>
-        <input
-          type="file"
-          className="hidden"
-          accept=".pdf,.jpg,.jpeg,.png"
-          onChange={e => {
-            const picked = e.target.files?.[0]
-            e.target.value = ''
-            if (!picked) return
-            // ── Type validation ──
-            if (!DOC_ALLOWED.includes(picked.type)) {
-              setErrors(prev => ({ ...prev, [errKey]: `Invalid format. Allowed: ${DOC_EXT_LIST}` }))
-              return
-            }
-            // ── Size validation ──
-            if (picked.size > DOC_MAX_BYTES) {
-              setErrors(prev => ({ ...prev, [errKey]: `File too large. Max ${DOC_MAX_MB} MB` }))
-              return
-            }
-            setDocs(d => ({ ...d, [docKey]: picked, [`reason_${docKey}`]: '' }))
-            clearError(errKey)
-          }}
-        />
-      </label>
+                      <label className="relative cursor-pointer">
+                        <div className={`flex items-center h-9 px-3 bg-gray-50 border rounded-lg hover:bg-gray-100 transition-colors
+                          ${errors[errKey] ? 'border-red-400' : 'border-gray-200'}`}>
+                          <span className="text-sm text-gray-400 flex-1 truncate">
+                            {file instanceof File ? file.name : 'Choose File'}
+                          </span>
+                          <div className="w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 ml-2" style={{ backgroundColor: PRIMARY }}>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                              <polyline points="17 8 12 3 7 8"/>
+                              <line x1="12" y1="3" x2="12" y2="15"/>
+                            </svg>
+                          </div>
+                        </div>
+                        <input type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png"
+                          onChange={e => {
+                            const picked = e.target.files?.[0]
+                            e.target.value = ''
+                            if (!picked) return
+                            if (!DOC_ALLOWED.includes(picked.type)) {
+                              setErrors(prev => ({ ...prev, [errKey]: `Invalid format. Allowed: ${DOC_EXT_LIST}` }))
+                              return
+                            }
+                            if (picked.size > DOC_MAX_BYTES) {
+                              setErrors(prev => ({ ...prev, [errKey]: `File too large. Max ${DOC_MAX_MB} MB` }))
+                              return
+                            }
+                            setDocs(d => ({ ...d, [docKey]: picked, [`reason_${docKey}`]: '' }))
+                            clearError(errKey)
+                          }}
+                        />
+                      </label>
 
-      {/* Format hint */}
-      <p className="text-[10px] text-gray-400 -mt-0.5">
-        {DOC_EXT_LIST} · Max {DOC_MAX_MB} MB
-      </p>
+                      <p className="text-[10px] text-gray-400 -mt-0.5">{DOC_EXT_LIST} · Max {DOC_MAX_MB} MB</p>
 
-      {/* Reason input — only when no file */}
-      {!(file instanceof File) && (
-        <input
-          type="text"
-          placeholder="Reason if document unavailable"
-          value={reason}
-          onChange={e => {
-            setDocs(d => ({ ...d, [`reason_${docKey}`]: e.target.value }))
-            clearError(errKey)
-          }}
-          className={`w-full h-8 px-2.5 text-xs text-gray-600 bg-gray-50 border rounded-lg
-            outline-none transition-colors
-            ${errors[errKey] ? 'border-red-400' : 'border-gray-200 focus:border-[#C35E33]'}`}
-        />
-      )}
+                      {!(file instanceof File) && (
+                        <input type="text" placeholder="Reason if document unavailable" value={reason}
+                          onChange={e => { setDocs(d => ({ ...d, [`reason_${docKey}`]: e.target.value })); clearError(errKey) }}
+                          className={`w-full h-8 px-2.5 text-xs text-gray-600 bg-gray-50 border rounded-lg outline-none transition-colors
+                            ${errors[errKey] ? 'border-red-400' : 'border-gray-200 focus:border-[#C35E33]'}`}
+                        />
+                      )}
 
-      {/* Single error message — shown ONCE only */}
-      <ErrorMsg msg={errors[errKey]} />
-    </div>
-  )
-})}
-
+                      <ErrorMsg msg={errors[errKey]} />
+                    </div>
+                  )
+                })}
               </div>
             )}
           </SectionCard>

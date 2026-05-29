@@ -244,8 +244,7 @@ export default function EditEmployee() {
           apiClient.get('/departments',   { params: { page: 0, size: 200 } }),
           apiClient.get('/designations',  { params: { page: 0, size: 200 } }),
           apiClient.get('/branches',      { params: { page: 0, size: 200 } }),
-          // Fetch document types applicable to EMPLOYEE only
-          apiClient.get('/document-types', { params: { applicableType: 'EMPLOYEE', page: 0, size: 100 } }),
+          apiClient.get('/document-types?applicableTypes=EMPLOYEE&page=0&size=100'),
         ])
 
         if (deptRes.status === 'fulfilled') {
