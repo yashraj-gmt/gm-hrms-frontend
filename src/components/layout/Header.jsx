@@ -1,7 +1,7 @@
 // src/components/layout/Header.jsx
 // ─── Tailwind CSS — profile dropdown, notification bell ──────────────────────
 import { useState, useEffect, useRef } from 'react'
-import { Bell, Search, ChevronDown, LogOut, User, Menu, X } from 'lucide-react'
+import { Bell, ChevronDown, LogOut, User, Menu, X } from 'lucide-react'
 import { useUIStore }   from '@/store/uiStore'
 import { useAuthStore } from '@/store/authStore'
 import { useNavigate }  from 'react-router-dom'
@@ -13,7 +13,6 @@ export default function Header() {
   const { sidebarOpen }         = useUIStore()
   const { user, logout }        = useAuthStore()
   const navigate                = useNavigate()
-  const [searchValue, setSearchValue] = useState('')
   const [isMobile, setIsMobile]       = useState(() => window.innerWidth < MOBILE_BP)
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const dropdownRef = useRef(null)
@@ -51,28 +50,38 @@ export default function Header() {
   return (
     <header className="flex items-center gap-4 px-5 h-16 flex-shrink-0 bg-black w-full box-border">
 
-      {/* ── Search Bar ─────────────────────────────────────────── */}
-      {!isMobile ? (
-        <div className="flex-1 min-w-0">
-          <label className="flex items-center gap-3 bg-white rounded-full px-5 h-11 border-2 border-[#C35E33] cursor-text">
-            <Search size={16} color="#9CA3AF" strokeWidth={2} className="flex-shrink-0" />
-            <input
-              type="text"
-              value={searchValue}
-              onChange={(e) => setSearchValue(e.target.value)}
-              placeholder="Search"
-              className="flex-1 bg-transparent border-none outline-none text-sm text-gray-900 font-[Plus_Jakarta_Sans] min-w-0 placeholder:text-gray-400"
-            />
-          </label>
-        </div>
-      ) : (
-        <button
-          aria-label="Search"
-          className="flex items-center justify-center w-10 h-10 rounded-xl border border-gray-700 bg-transparent cursor-pointer ml-auto"
-        >
-          <Search size={18} color="#FFFFFF" strokeWidth={1.8} />
-        </button>
-      )}
+     {/* ── Welcome Message ────────────────────────────────────── */}
+{/* ── Welcome Message ────────────────────────────────────── */}
+<div className="flex-1 min-w-0 flex items-center gap-4">
+  <div className="flex items-center gap-2.5 leading-none">
+    <span className="text-gray-300 text-[13px] font-medium whitespace-nowrap">
+      Welcome to
+    </span>
+<span className="font-extrabold whitespace-nowrap"
+  style={{ fontSize: isMobile ? '16px' : '20px', letterSpacing: '0.06em', fontFamily: "'Clash Display', sans-serif" }}>
+      <span className="text-white">GM </span>
+      <span style={{
+        background: 'linear-gradient(90deg, #C35E33 0%, #F0956A 100%)',
+        WebkitBackgroundClip: 'text',
+        WebkitTextFillColor: 'transparent',
+        textShadow: 'none',
+      }}>
+        HRMS
+      </span>
+    </span>
+  </div>
+
+  {!isMobile && (
+    <>
+      <div className="h-5 w-px bg-gray-600 flex-shrink-0" />
+      <p className="text-gray-300 text-[12px] font-medium truncate">
+        {new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+      </p>
+    </>
+  )}
+</div>
+
+
 
       {/* ── Right Section ──────────────────────────────────────── */}
       <div className={`flex items-center gap-3 flex-shrink-0 ${isMobile ? '' : ''}`}>

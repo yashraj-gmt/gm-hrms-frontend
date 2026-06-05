@@ -44,7 +44,13 @@ const toLocalDatetimeValue = (dt) => {
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
-const localDatetimeToISO = (val) => val ? new Date(val).toISOString() : null
+const localDatetimeToISO = (val) => {
+  if (!val) return null
+  // datetime-local gives "YYYY-MM-DDTHH:mm" — append seconds for Java LocalDateTime.
+  // Do NOT use new Date(val).toISOString() as that converts to UTC,
+  // but the backend uses LocalDateTime which has no timezone.
+  return val.length === 16 ? val + ':00' : val
+}
 
 const STATUS_CONFIG = {
   PENDING:     { label: 'Pending',     bg: '#FEF9C3', color: '#854D0E', dot: '#F59E0B', icon: Clock        },
@@ -474,15 +480,10 @@ export default function EmployeeAttendanceCorrectionRequest() {
   const fetchMyRequests = useCallback(async () => {
     setRequestsLoading(true)
     try {
-      const params = statusFilter !== 'All' ? { status: statusFilter } : {}
-      const res = await attendanceService.getCorrectionRequests(requestsPage - 1, PAGE_SIZE)
+      const statusParam = statusFilter !== 'All' ? statusFilter : ''
+      const res = await attendanceService.getMyCorrectionRequests(requestsPage - 1, PAGE_SIZE, statusParam)
       if (res?.success && res?.data) {
-        let content = res.data.content || []
-        // Client-side status filter (or pass to API if backend supports per-employee filtering)
-        if (statusFilter !== 'All') {
-          content = content.filter((r) => r.status === statusFilter)
-        }
-        setMyRequests(content)
+        setMyRequests(res.data.content || [])
         setRequestsTotal(res.data.totalElements || 0)
       }
     } catch (err) {

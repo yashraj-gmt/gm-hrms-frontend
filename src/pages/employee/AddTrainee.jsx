@@ -7,13 +7,19 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate, useParams, useLocation } from 'react-router-dom'
-import { Mail, Save, UserPlus, ArrowLeft, Loader2, FileText, CheckCircle } from 'lucide-react'
+import { Mail, Save, UserPlus, ArrowLeft, Loader2, FileText, CheckCircle, ExternalLink, AlertCircle } from 'lucide-react'
 import { useToast } from '@/components/shared/toast/ToastProvider'
 import SearchableSelect from '@/components/shared/SearchableSelect'
 import employeeService from '@/services/employeeService'
 import apiClient from '@/services/apiClient'
 import shiftService from '@/services/shiftService'
-import profileIconFallback from '@/assets/images/profile-icon.png'
+
+const getFileUrl = (path) => {
+  if (!path) return ''
+  if (path.startsWith('http://') || path.startsWith('https://')) return path
+  return path.startsWith('/') ? path : '/' + path
+}
+
 
 const PRIMARY = '#C35E33'
 
@@ -70,7 +76,7 @@ function validateEmail(value, fieldName) {
   return null
 }
 
-function buildErrors(p, office, training, edu, addr, bank, docs, docReasons, docTypes, existingDocs) {
+function buildErrors(p, office, training, edu, addr, bank, docs, docReasons, docTypes) {
   const errs = {}
 
   if (!p.firstName.trim())   errs.firstName     = 'First name is required'
@@ -141,18 +147,17 @@ function buildErrors(p, office, training, edu, addr, bank, docs, docReasons, doc
     if (!addr.permCountry.trim())  errs.permCountry  = 'Country is required'
   }
 
-if (Array.isArray(docTypes)) {
-  docTypes.forEach(dt => {
-    if (dt.mandatory) {
-      const key         = dt.key || dt.docKey || String(dt.id)
-      const hasFile     = docs[key] instanceof File     // ← key, not docKey
-      const hasExisting = !!(existingDocs?.[key]?.filePath)
-      const hasReason   = docReasons?.[key]?.trim()
-      if (!hasFile && !hasExisting && !hasReason)
-        errs[`doc_${key}`] = `${dt.name} is required (upload file or provide reason)`
-    }
-  })
-}
+  if (Array.isArray(docTypes)) {
+    docTypes.forEach(dt => {
+      if (dt.mandatory) {
+        const key       = dt.key || dt.docKey || String(dt.id)
+        const hasFile   = docs[key] instanceof File || (docs[key] && (typeof docs[key] === 'string' || docs[key].filePath))
+        const hasReason = docReasons?.[key]?.trim()
+        if (!hasFile && !hasReason)
+          errs[`doc_${key}`] = `${dt.name} is required (upload file or provide reason)`
+      }
+    })
+  }
 
   return errs
 }
@@ -202,12 +207,28 @@ function SelectInput({ children, value, onChange, error }) {
   )
 }
 
-function PhoneInput({ value, onChange, error }) {
+function PhoneInput({ code = '+91', onCodeChange, value, onChange, error }) {
   const h = (e) => onChange({ target: { value: e.target.value.replace(/\D/g, '').slice(0, 10) } })
   return (
     <>
       <div className="flex h-9">
-        <span className="flex items-center px-2 bg-gray-50 border border-r-0 border-gray-200 rounded-l-lg text-xs text-gray-500 whitespace-nowrap">+91</span>
+        <select
+          value={code}
+          onChange={onCodeChange}
+          className="flex items-center px-1 bg-gray-50 border border-r-0 border-gray-200 rounded-l-lg text-xs text-gray-500 outline-none cursor-pointer"
+        >
+          <option value="+91">+91</option>
+          <option value="+1">+1</option>
+          <option value="+44">+44</option>
+          <option value="+971">+971</option>
+          <option value="+65">+65</option>
+          <option value="+61">+61</option>
+          <option value="+966">+966</option>
+          <option value="+968">+968</option>
+          <option value="+974">+974</option>
+          <option value="+973">+973</option>
+          <option value="+965">+965</option>
+        </select>
         <input type="tel" inputMode="numeric" placeholder="9876543210" value={value} onChange={h} maxLength={10}
           className={`flex-1 min-w-0 px-2 text-sm text-gray-700 bg-gray-50 border rounded-r-lg outline-none transition-colors
             ${error ? 'border-red-400' : 'border-gray-200 focus:border-[#C35E33]'}`} />
@@ -230,17 +251,31 @@ function RadioOption({ name, value, checked, onChange, label }) {
   )
 }
 
-// ─── FIX 3: Profile Photo Upload with preview + fallback ───────────────────
+// ─── Profile Photo Upload with preview + fallback ──────────────────────────
 function ProfilePhotoUpload({ file, onChange, error }) {
-  const [imgError, setImgError] = useState(false)
+  const [fileError, setFileError] = useState(false)
 
-  // file can be: File object (new upload) | string URL (existing from DB) | null
-  const previewUrl = file instanceof File
-    ? URL.createObjectURL(file)
-    : typeof file === 'string' && file ? file : null
-
-  // Reset imgError when file changes
-  useEffect(() => { setImgError(false) }, [file])
+  useEffect(() => {
+    let active = true
+    if (typeof file === 'string' && file) {
+      const url = getFileUrl(file)
+      fetch(url, { method: 'HEAD' })
+        .then((res) => {
+          if (active) setFileError(!res.ok)
+        })
+        .catch(() => {
+          if (active) setFileError(true)
+        })
+    } else {
+      const timer = setTimeout(() => {
+        if (active) setFileError(false)
+      }, 0)
+      return () => clearTimeout(timer)
+    }
+    return () => {
+      active = false
+    }
+  }, [file])
 
   const handleChange = (e) => {
     const picked = e.target.files?.[0]
@@ -263,97 +298,184 @@ function ProfilePhotoUpload({ file, onChange, error }) {
       ? file.split('/').pop()
       : null
 
+  const handleView = (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (!file) return
+    if (file instanceof File) {
+      const url = URL.createObjectURL(file)
+      window.open(url, '_blank')
+    } else {
+      window.open(getFileUrl(file), '_blank')
+    }
+  }
+
   return (
     <div>
-      {/* ✅ FIX 3: Show preview image if URL/File exists, with fallback avatar */}
-      {previewUrl && (
-        <div className="mb-2 flex items-center gap-3">
-          <div className="w-16 h-16 rounded-xl overflow-hidden border-2 flex-shrink-0"
-            style={{ borderColor: error ? '#F87171' : '#E8C5A8' }}>
-            {!imgError ? (
-              <img
-                src={previewUrl}
-                alt="Profile"
-                className="w-full h-full object-cover"
-                onError={() => setImgError(true)}
-              />
-            ) : (
-              <img
-                src={profileIconFallback}
-                alt="Profile fallback"
-                className="w-full h-full object-cover"
-              />
-            )}
+      <div className="flex items-center gap-2">
+        <label className="relative cursor-pointer flex-1">
+          <div className={`flex items-center h-9 px-3 bg-gray-50 border rounded-lg hover:bg-gray-100 transition-colors ${
+            error ? 'border-red-400' : 'border-gray-200'
+          }`}>
+            <span className="text-sm text-gray-400 flex-1 truncate">
+              {displayName || 'Choose Photo'}
+            </span>
+            <div className="w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 ml-2" style={{ backgroundColor: PRIMARY }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                <polyline points="17 8 12 3 7 8"/>
+                <line x1="12" y1="3" x2="12" y2="15"/>
+              </svg>
+            </div>
           </div>
-          <div className="min-w-0">
-            <p className="text-xs font-medium text-gray-700 truncate max-w-[160px]" title={displayName}>
-              {imgError ? 'Image unavailable' : (displayName || 'Current photo')}
-            </p>
-            <p className="text-[10px] text-gray-400 mt-0.5">Click below to replace</p>
-          </div>
-        </div>
-      )}
+          <input type="file" className="hidden" accept={PROFILE_PHOTO_ALLOWED.join(',')} onChange={handleChange} />
+        </label>
 
-      <label className="relative cursor-pointer">
-        <div className={`flex items-center h-9 px-3 bg-gray-50 border rounded-lg hover:bg-gray-100 transition-colors ${
-          error ? 'border-red-400' : 'border-gray-200'
-        }`}>
-          <span className="text-sm text-gray-400 flex-1 truncate">
-            {displayName || 'Choose Photo'}
-          </span>
-          <div className="w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 ml-2" style={{ backgroundColor: PRIMARY }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
-              <polyline points="17 8 12 3 7 8"/>
-              <line x1="12" y1="3" x2="12" y2="15"/>
-            </svg>
-          </div>
-        </div>
-        <input type="file" className="hidden" accept={PROFILE_PHOTO_ALLOWED.join(',')} onChange={handleChange} />
-      </label>
+        {file && (
+          <button
+            type="button"
+            onClick={handleView}
+            className="h-9 px-3 border border-gray-200 rounded-lg text-xs font-semibold hover:bg-gray-50 flex items-center justify-center gap-1.5 transition-colors"
+            style={{ color: PRIMARY, borderColor: '#E5E7EB' }}
+            title="View photo"
+          >
+            <ExternalLink size={12} />
+          </button>
+        )}
+      </div>
       <p className="text-[10px] text-gray-400 mt-0.5 leading-relaxed">
         Formats: {PROFILE_PHOTO_EXT_LIST} · Max {PROFILE_PHOTO_MAX_MB} MB
       </p>
+      {fileError && (
+        <p className="text-[10px] text-red-500 font-semibold mt-0.5">
+          File not found (unable to open the file)
+        </p>
+      )}
       <ErrorMsg msg={error} />
     </div>
   )
 }
 
-// ─── FIX 1 + 2: Document card showing existing uploaded file from DB ────────
-function ExistingDocBadge({ filePath, onReplace }) {
-  const [broken, setBroken] = useState(false)
-  const filename = filePath ? filePath.split('/').pop() : 'Document'
-  const isPdf    = filename.toLowerCase().endsWith('.pdf')
+function DocumentUploadRow({ dt, file, reason, error, onFileChange, onReasonChange }) {
+  const [fileError, setFileError] = useState(false)
+
+  useEffect(() => {
+    let active = true
+    const filePath = file && !(file instanceof File) ? file.filePath : null
+    if (filePath) {
+      const url = getFileUrl(filePath)
+      fetch(url, { method: 'HEAD' })
+        .then((res) => {
+          if (active) setFileError(!res.ok)
+        })
+        .catch(() => {
+          if (active) setFileError(true)
+        })
+    } else {
+      const timer = setTimeout(() => {
+        if (active) setFileError(false)
+      }, 0)
+      return () => clearTimeout(timer)
+    }
+    return () => {
+      active = false
+    }
+  }, [file])
+
+  const handleView = (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (!file) return
+    if (file instanceof File) {
+      const url = URL.createObjectURL(file)
+      window.open(url, '_blank')
+    } else if (file.filePath) {
+      window.open(getFileUrl(file.filePath), '_blank')
+    }
+  }
+
+  const displayName = file instanceof File
+    ? file.name
+    : file && typeof file === 'object' && file.name
+      ? file.name
+      : 'Choose File'
 
   return (
-    <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-green-200 bg-green-50">
-      {/* ✅ FIX 2: Show doc icon with fallback for broken image URLs */}
-      <div className="w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 bg-green-100">
-        {isPdf || broken ? (
-          <FileText size={14} color="#16A34A" />
-        ) : (
-          <img
-            src={filePath}
-            alt="doc"
-            className="w-7 h-7 rounded-md object-cover"
-            onError={() => setBroken(true)}
+    <div className="flex flex-col gap-1.5">
+      <FieldLabel required={dt.mandatory}>
+        {dt.name}
+        {dt.mandatory && (
+          <span className="ml-1.5 text-[10px] font-normal text-gray-400">(mandatory)</span>
+        )}
+      </FieldLabel>
+
+      <div className="flex items-center gap-2">
+<label className="relative cursor-pointer flex-1 min-w-0">
+            <div className={`flex items-center h-9 px-3 bg-gray-50 border rounded-lg hover:bg-gray-100 transition-colors ${
+            error ? 'border-red-400' : 'border-gray-200'
+          }`}>
+            <span className="text-sm text-gray-400 flex-1 truncate min-w-0">
+              {displayName}
+            </span>
+            <div className="w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 ml-2"
+              style={{ backgroundColor: PRIMARY }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white"
+                strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                <polyline points="17 8 12 3 7 8"/>
+                <line x1="12" y1="3" x2="12" y2="15"/>
+              </svg>
+            </div>
+          </div>
+          <input type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png"
+            onChange={e => {
+              const picked = e.target.files?.[0]
+              e.target.value = ''
+              if (!picked) return
+              if (!DOC_ALLOWED.includes(picked.type)) {
+                onFileChange(null, `Invalid format. Allowed: ${DOC_EXT_LIST}`)
+                return
+              }
+              if (picked.size > DOC_MAX_BYTES) {
+                onFileChange(null, `File too large. Max ${DOC_MAX_MB} MB`)
+                return
+              }
+              onFileChange(picked, null)
+            }}
           />
+        </label>
+
+        {file && (
+          <button
+            type="button"
+            onClick={handleView}
+            className="h-9 px-3 border border-gray-200 rounded-lg text-xs font-semibold hover:bg-gray-50 flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap"
+            style={{ color: PRIMARY, borderColor: '#E5E7EB' }}
+            title="View document"
+          >
+            <ExternalLink size={12} />
+          </button>
         )}
       </div>
-      <div className="flex-1 min-w-0">
-        <p className="text-[10px] font-semibold text-green-800 truncate" title={filename}>
-          {filename}
+
+      <p className="text-[10px] text-gray-400 -mt-0.5">{DOC_EXT_LIST} · Max {DOC_MAX_MB} MB</p>
+
+      {fileError && (
+        <p className="text-[10px] text-red-500 font-semibold -mt-1">
+          File not found (unable to open the file)
         </p>
-        <p className="text-[9px] text-green-600">Uploaded ✓</p>
-      </div>
-      <button
-        type="button"
-        onClick={onReplace}
-        className="text-[9px] font-semibold text-gray-400 hover:text-red-500 transition-colors whitespace-nowrap"
-        title="Replace document"
-      >
-        Replace
-      </button>
+      )}
+
+      {!file && (
+        <input type="text" placeholder="Reason if document unavailable" value={reason}
+          onChange={e => onReasonChange(e.target.value)}
+          className={`w-full h-8 px-2.5 text-xs text-gray-600 bg-gray-50 border rounded-lg outline-none transition-colors ${
+            error ? 'border-red-400' : 'border-gray-200 focus:border-[#C35E33]'
+          }`}
+        />
+      )}
+
+      <ErrorMsg msg={error} />
     </div>
   )
 }
@@ -491,7 +613,8 @@ export default function AddTrainee() {
   // ── Form state ───────────────────────────────────────────────────────────
   const [personal, setPersonal] = useState({
     firstName: '', middleName: '', lastName: '', gender: '',
-    dob: '', personalPhone: '', emergencyPhone: '', personalEmail: '',
+    dob: '', personalPhone: '', personalPhoneCode: '+91',
+    emergencyPhone: '', emergencyPhoneCode: '+91', personalEmail: '',
     maritalStatus: '', spouseName: '', profilePhoto: null,
   })
 
@@ -535,12 +658,32 @@ export default function AddTrainee() {
     uanNumber: '', esicNumber: '',
   })
 
-  const [documents,     setDocuments]     = useState({})   // { docKey: File } for newly uploaded
-  const [docReasons,    setDocReasons]    = useState({})   // { docKey: 'reason text' }
-  // ✅ FIX 1: existingDocs stores DB records: { docKey: { filePath, reason, ... } }
-  const [existingDocs,  setExistingDocs]  = useState({})
-  // Track which existing docs the user wants to replace
-  const [replacingDocs, setReplacingDocs] = useState({})
+  const [documents,  setDocuments]  = useState({})
+  const [docReasons, setDocReasons] = useState({})
+
+  async function loadExistingDocuments(personalInformationId) {
+    try {
+      const res = await apiClient.get(`/persons/${personalInformationId}/documents`)
+      const docs = res?.data?.data ?? res?.data ?? []
+      if (Array.isArray(docs)) {
+        const reasonMap = {}
+        const docsMap = {}
+        docs.forEach(doc => {
+          const key = doc.documentTypeKey ?? doc.docKey ?? String(doc.documentTypeId ?? doc.id)
+          if (doc.filePath) {
+            docsMap[key] = { id: doc.id, name: doc.filePath.split('/').pop(), filePath: doc.filePath }
+          }
+          if (doc.reason) {
+            reasonMap[key] = doc.reason
+          }
+        })
+        setDocReasons(reasonMap)
+        setDocuments(docsMap)
+      }
+    } catch {
+      // Non-fatal
+    }
+  }
 
   // ── Load dropdowns ───────────────────────────────────────────────────────
   useEffect(() => {
@@ -610,11 +753,12 @@ export default function AddTrainee() {
           gender:        emp.gender             ?? '',
           dob:           emp.dateOfBirth        ?? '',
           personalPhone: contact.personalPhone  ?? '',
+          personalPhoneCode: contact.personalPhoneCode ?? '+91',
           emergencyPhone:contact.emergencyPhone ?? '',
+          emergencyPhoneCode: contact.emergencyPhoneCode ?? '+91',
           personalEmail: contact.personalEmail  ?? '',
           maritalStatus: emp.maritalStatus      ?? '',
           spouseName:    emp.spouseOrParentName  ?? '',
-          // ✅ FIX 3: profilePhoto set to URL string — ProfilePhotoUpload renders it
           profilePhoto:  emp.profileImageUrl    ?? null,
         })
 
@@ -702,68 +846,37 @@ if (piId) {
       }
     }
     load()
-  }, [id])
+  }, [id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Resolve dropdown IDs by name after dropdowns load ───────────────────
 useEffect(() => {
-  if (isAddMode) return
-  // Don't run until at least one dropdown has loaded
-  if (!departments.length && !designations.length && !branches.length && !shifts.length) return
+    if (isAddMode) return
+    const timer = setTimeout(() => {
+      setOffice(prev => {
+        const updated = { ...prev }
 
-  setOffice(prev => {
-    const updated = { ...prev }
-
-    if (prev.designation && !prev.designationId && designations.length > 0) {
-      const match = designations.find(d => d.name === prev.designation)
-      if (match) updated.designationId = match.id
-    }
-    if (prev.department && !prev.departmentId && departments.length > 0) {
-      const match = departments.find(d => d.name === prev.department)
-      if (match) updated.departmentId = match.id
-    }
-    if (prev.workLocation && !prev.workLocationId && branches.length > 0) {
-      const match = branches.find(b => b.branchName === prev.workLocation)
-      if (match) updated.workLocationId = match.id
-    }
-    if (prev.shiftName && !prev.shiftId && shifts.length > 0) {
-      const match = shifts.find(s => s.shiftName === prev.shiftName)
-      if (match) updated.shiftId = match.id
-    }
-    return updated
-  })
-}, [departments, designations, branches, shifts, isAddMode])
-
-  const loadExistingDocuments = async (personalInformationId) => {
-  try {
-    const res = await apiClient.get(`/persons/${personalInformationId}/documents`)
-    const docs = res?.data?.data ?? res?.data ?? []
-    if (Array.isArray(docs)) {
-      const existingMap = {}
-      const reasonMap   = {}
-
-      docs.forEach(doc => {
-        const key = doc.documentTypeKey 
-               ?? doc.docKey
-               ?? String(doc.documentTypeId ?? doc.id)
-
-        existingMap[key] = {
-          filePath: doc.filePath ?? null,
-          reason:   doc.reason   ?? null,
-          name:     doc.documentTypeName ?? doc.name ?? key,
+        if (prev.designation && !prev.designationId && designations.length > 0) {
+          const match = designations.find(d => d.name === prev.designation)
+          if (match) updated.designationId = match.id
         }
-
-        if (doc.reason) {
-          reasonMap[key] = doc.reason
+        if (prev.department && !prev.departmentId && departments.length > 0) {
+          const match = departments.find(d => d.name === prev.department)
+          if (match) updated.departmentId = match.id
         }
+        if (prev.workLocation && !prev.workLocationId && branches.length > 0) {
+          const match = branches.find(b => b.branchName === prev.workLocation)
+          if (match) updated.workLocationId = match.id
+        }
+        if (prev.shiftName && !prev.shiftId && shifts.length > 0) {
+          const match = shifts.find(s => s.shiftName === prev.shiftName)
+          if (match) updated.shiftId = match.id
+        }
+        return updated
       })
+    }, 0)
 
-      setExistingDocs(existingMap)
-      setDocReasons(prev => ({ ...prev, ...reasonMap })) 
-    }
-  } catch (err) {
-    console.error('Failed to load existing documents:', err)  
-  }
-}
+    return () => clearTimeout(timer)
+  }, [departments, designations, branches, shifts, isAddMode])
 
   // ── Helpers ──────────────────────────────────────────────────────────────
   const up  = f => e => setPersonal(p  => ({ ...p,  [f]: e.target?.value ?? e }))
@@ -800,8 +913,9 @@ useEffect(() => {
       maritalStatus:      personal.maritalStatus ? personal.maritalStatus.toUpperCase() : null,
       spouseOrParentName: personal.spouseName.trim() || null,
       personalPhone:      personal.personalPhone || null,
+      personalPhoneCode:  personal.personalPhoneCode || '+91',
       emergencyPhone:     personal.emergencyPhone || null,
-      personalEmail:      personal.personalEmail.trim() || null,
+      emergencyPhoneCode: personal.emergencyPhoneCode || '+91',
       officeEmail:        office.officeEmail.trim() || null,
       workProfile: {
         departmentId:       office.departmentId   || null,
@@ -937,7 +1051,7 @@ const handleUpdate = async () => {
   } else {
     const errs = buildErrors(
       personal, office, training, edu, address,
-      bank, documents, docReasons, docTypes, existingDocs
+      bank, documents, docReasons, docTypes
     )
     if (Object.keys(errs).length > 0) {
       setErrors(errs)
@@ -982,7 +1096,7 @@ const handleUpdate = async () => {
 
   // ── Submit (Add mode only) ────────────────────────────────────────────────
   const handleSubmitClick = () => {
-    const errs = buildErrors(personal, office, training, edu, address, bank, documents, docReasons, docTypes, existingDocs)
+    const errs = buildErrors(personal, office, training, edu, address, bank, documents, docReasons, docTypes)
     if (Object.keys(errs).length > 0) {
       setErrors(errs)
       toast.warning('Please fix the highlighted fields before submitting')
@@ -1109,13 +1223,23 @@ const handleUpdate = async () => {
               </div>
               <div data-error={!!errors.personalPhone}>
                 <FieldLabel required>Personal Phone</FieldLabel>
-                <PhoneInput value={personal.personalPhone} error={errors.personalPhone}
-                  onChange={e => { up('personalPhone')(e); clearError('personalPhone') }} />
+                <PhoneInput
+                  code={personal.personalPhoneCode}
+                  onCodeChange={e => { up('personalPhoneCode')(e.target.value) }}
+                  value={personal.personalPhone}
+                  error={errors.personalPhone}
+                  onChange={e => { up('personalPhone')(e); clearError('personalPhone') }}
+                />
               </div>
               <div data-error={!!errors.emergencyPhone}>
                 <FieldLabel required>Emergency Phone</FieldLabel>
-                <PhoneInput value={personal.emergencyPhone} error={errors.emergencyPhone}
-                  onChange={e => { up('emergencyPhone')(e); clearError('emergencyPhone') }} />
+                <PhoneInput
+                  code={personal.emergencyPhoneCode}
+                  onCodeChange={e => { up('emergencyPhoneCode')(e.target.value) }}
+                  value={personal.emergencyPhone}
+                  error={errors.emergencyPhone}
+                  onChange={e => { up('emergencyPhone')(e); clearError('emergencyPhone') }}
+                />
               </div>
               <div data-error={!!errors.personalEmail}>
                 <FieldLabel required>Personal Email</FieldLabel>
@@ -1605,99 +1729,32 @@ const handleUpdate = async () => {
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                 {docTypes.map((dt, idx) => {
-                  const docKey    = dt.key || dt.docKey || String(dt.id || idx)
-                  const errKey    = `doc_${docKey}`
-                  const newFile   = documents[docKey]
-                  const reason    = docReasons[docKey] ?? ''
-                  // ✅ FIX 1: Get existing DB record for this doc type
-                  const existing  = existingDocs[docKey]
-                  const isReplacing = replacingDocs[docKey]
-
-                  // Show the existing badge unless user clicked Replace or uploaded a new file
-                  const showExistingBadge = existing?.filePath && !isReplacing && !(newFile instanceof File)
-
+                  const docKey = dt.key || dt.docKey || String(dt.id || idx)
+                  const errKey = `doc_${docKey}`
+                  const file   = documents[docKey]
+                  const reason = docReasons[docKey] ?? ''
                   return (
-                    <div key={docKey} className="flex flex-col gap-1.5">
-                      <FieldLabel required={dt.mandatory}>
-                        {dt.name}
-                        {dt.mandatory && (
-                          <span className="ml-1.5 text-[10px] font-normal text-gray-400">(mandatory)</span>
-                        )}
-                      </FieldLabel>
-
-                      {/* ✅ FIX 1 + 2: Show existing doc badge with fallback icon */}
-                      {showExistingBadge ? (
-                        <ExistingDocBadge
-                          filePath={existing.filePath}
-                          onReplace={() => setReplacingDocs(r => ({ ...r, [docKey]: true }))}
-                        />
-                      ) : (
-                        <>
-                          <label className="relative cursor-pointer">
-                            <div className={`flex items-center h-9 px-3 bg-gray-50 border rounded-lg hover:bg-gray-100 transition-colors
-                              ${errors[errKey] ? 'border-red-400' : 'border-gray-200'}`}>
-                              <span className="text-sm text-gray-400 flex-1 truncate">
-                                {newFile instanceof File ? newFile.name : 'Choose File'}
-                              </span>
-                              <div className="w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 ml-2" style={{ backgroundColor: PRIMARY }}>
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                  <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
-                                  <polyline points="17 8 12 3 7 8"/>
-                                  <line x1="12" y1="3" x2="12" y2="15"/>
-                                </svg>
-                              </div>
-                            </div>
-                            <input type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png"
-                              onChange={e => {
-                                const picked = e.target.files?.[0]
-                                e.target.value = ''
-                                if (!picked) return
-                                if (!DOC_ALLOWED.includes(picked.type)) {
-                                  setErrors(prev => ({ ...prev, [errKey]: `Invalid format. Allowed: ${DOC_EXT_LIST}` }))
-                                  return
-                                }
-                                if (picked.size > DOC_MAX_BYTES) {
-                                  setErrors(prev => ({ ...prev, [errKey]: `File too large. Max ${DOC_MAX_MB} MB` }))
-                                  return
-                                }
-                                setDocuments(d => ({ ...d, [docKey]: picked }))
-                                setDocReasons(d => ({ ...d, [docKey]: '' }))
-                                // Clear the "replacing" flag once a new file is picked
-                                setReplacingDocs(r => { const n = { ...r }; delete n[docKey]; return n })
-                                clearError(errKey)
-                              }}
-                            />
-                          </label>
-
-                          <p className="text-[10px] text-gray-400 -mt-0.5">{DOC_EXT_LIST} · Max {DOC_MAX_MB} MB</p>
-
-                          {/* Cancel replace — go back to showing existing badge */}
-                          {isReplacing && existing?.filePath && !(newFile instanceof File) && (
-                            <button
-                              type="button"
-                              onClick={() => setReplacingDocs(r => { const n = { ...r }; delete n[docKey]; return n })}
-                              className="text-[10px] text-gray-400 hover:text-gray-600 text-left"
-                            >
-                              ← Keep existing document
-                            </button>
-                          )}
-
-                          {/* Reason input — only when no file uploaded and no existing doc */}
-                          {!(newFile instanceof File) && (
-                            <input type="text" placeholder="Reason if document unavailable" value={reason}
-                              onChange={e => {
-                                setDocReasons(d => ({ ...d, [docKey]: e.target.value }))
-                                clearError(errKey)
-                              }}
-                              className={`w-full h-8 px-2.5 text-xs text-gray-600 bg-gray-50 border rounded-lg outline-none transition-colors
-                                ${errors[errKey] ? 'border-red-400' : 'border-gray-200 focus:border-[#C35E33]'}`}
-                            />
-                          )}
-                        </>
-                      )}
-
-                      <ErrorMsg msg={errors[errKey]} />
-                    </div>
+                    <DocumentUploadRow
+                      key={docKey}
+                      dt={dt}
+                      file={file}
+                      reason={reason}
+                      error={errors[errKey]}
+                      onFileChange={(picked, validationError) => {
+                        if (validationError) {
+                          setErrors(prev => ({ ...prev, [errKey]: validationError }))
+                          setDocuments(d => ({ ...d, [docKey]: null }))
+                        } else {
+                          setDocuments(d => ({ ...d, [docKey]: picked }))
+                          setDocReasons(d => ({ ...d, [docKey]: '' }))
+                          clearError(errKey)
+                        }
+                      }}
+                      onReasonChange={(val) => {
+                        setDocReasons(d => ({ ...d, [docKey]: val }))
+                        clearError(errKey)
+                      }}
+                    />
                   )
                 })}
               </div>

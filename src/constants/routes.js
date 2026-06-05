@@ -26,7 +26,13 @@ EMPLOYEE_TRAINEE_VIEW:     '/trainee/:id/view',
 EMPLOYEE_TRAINEE_EDIT:     '/trainee/:id/edit',     
 EMPLOYEE_TRAINEE_DRAFT:    '/trainee/:id/draft',   
 
-  // ── Attendance ───────────────────────────────────────────────────────────────
+// Intern view / edit / draft
+EMPLOYEE_INTERN_VIEW:     '/intern/:id/view',
+EMPLOYEE_INTERN_EDIT:     '/intern/:id/edit',     
+EMPLOYEE_INTERN_DRAFT:    '/intern/:id/draft',   
+
+
+  // ── Attendance 
   ATTENDANCE:                  '/attendance',
   ATTENDANCE_EMPLOYEE:         '/my-attendance',
   ATTENDANCE_PENDING:          '/attendance/pending',

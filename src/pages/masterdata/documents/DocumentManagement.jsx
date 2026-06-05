@@ -33,12 +33,6 @@ const FILTER_CONFIG = [
   },
 ]
 
-// ─── Derive enum values from the filter state ─────────────────────────────────
-const toEnumTypes = (filters) =>
-  (filters.applicableTypes ?? [])
-    .map((label) => FILTER_LABEL_TO_ENUM[label])
-    .filter(Boolean)
-
 // ─── Status Badge ─────────────────────────────────────────────────────────────
 function StatusBadge({ active }) {
   return active ? (
@@ -188,7 +182,7 @@ function DocumentModal({ mode, initial, onClose, onSaved }) {
         key: p.name.trim().toUpperCase().replace(/\s+/g, '_').replace(/[^A-Z0-9_]/g, ''),
       }))
     }
-  }, [form.name, isEdit]) // eslint-disable-line
+  }, [form.name, isEdit])
 
   // Close on Escape
   useEffect(() => {
@@ -497,19 +491,16 @@ export default function DocumentManagement() {
 
   // ── Pagination & data ──────────────────────────────────────────────────────
   const [page,          setPage]          = useState(0)
-  const [docs,          setDocs]          = useState([])
-  const [totalElements, setTotalElements] = useState(0)
-  const [totalPages,    setTotalPages]    = useState(0)
+  const [allDocs,       setAllDocs]       = useState([])
   const [tableLoading,  setTableLoading]  = useState(false)
 
   // ── Stats ──────────────────────────────────────────────────────────────────
   const [stats,        setStats]        = useState({ total: 0, active: 0, inactive: 0 })
   const [statsLoading, setStatsLoading] = useState(false)
 
-  // ── Search (client-side within current page) ───────────────────────────────
-  const [search, setSearch] = useState('')
-
-  // ── Filter modal ───────────────────────────────────────────────────────────
+  // ── Search & Filter ────────────────────────────────────────────────────────
+  const [search,        setSearch]        = useState('')
+  const [statusFilter,  setStatusFilter]  = useState('ALL') // 'ALL' | 'ACTIVE' | 'INACTIVE'
   const [showFilter,    setShowFilter]    = useState(false)
   const [activeFilters, setActiveFilters] = useState({})  // { applicableTypes: ['Employee', ...] }
 
@@ -525,17 +516,15 @@ export default function DocumentManagement() {
   const [deleting,     setDeleting]     = useState(false)
 
   // ── Fetch list ─────────────────────────────────────────────────────────────
-  const fetchDocs = useCallback(async (currentPage, enumTypes = []) => {
+  const fetchDocs = useCallback(async () => {
     setTableLoading(true)
     try {
-      const res      = await documentService.getAll(currentPage, PAGE_SIZE, enumTypes)
+      const res      = await documentService.getAll(0, 9999)
       const pageData = res?.data ?? {}
-      setDocs(pageData.content       ?? [])
-      setTotalElements(pageData.totalElements ?? 0)
-      setTotalPages(pageData.totalPages    ?? 0)
+      setAllDocs(pageData.content ?? [])
     } catch (err) {
       toast.error(err?.message ?? 'Failed to load documents', 'Fetch Error')
-      setDocs([])
+      setAllDocs([])
     } finally {
       setTableLoading(false)
     }
@@ -552,32 +541,22 @@ export default function DocumentManagement() {
   }, [])
 
   // Initial load
-  useEffect(() => { fetchDocs(0, []); fetchStats() }, []) // eslint-disable-line
+  useEffect(() => { fetchDocs(); fetchStats() }, [fetchDocs, fetchStats])
 
   // ── Filter apply / reset ───────────────────────────────────────────────────
   const handleApplyFilter = useCallback((filters) => {
     setActiveFilters(filters)
-    setPage(0)
-    fetchDocs(0, toEnumTypes(filters))
-  }, [fetchDocs])
+  }, [])
 
   const handleResetFilter = useCallback(() => {
     setActiveFilters({})
-    setPage(0)
-    fetchDocs(0, [])
-  }, [fetchDocs])
+  }, [])
 
-  // ── Pagination ─────────────────────────────────────────────────────────────
-  const handlePageChange = (p) => {
-    setPage(p)
-    fetchDocs(p, toEnumTypes(activeFilters))
-  }
-
-  // ── Refresh (respects current filters) ────────────────────────────────────
+  // ── Refresh ────────────────────────────────────────────────────────────────
   const handleRefresh = useCallback(() => {
-    fetchDocs(page, toEnumTypes(activeFilters))
+    fetchDocs()
     fetchStats()
-  }, [fetchDocs, fetchStats, page, activeFilters])
+  }, [fetchDocs, fetchStats])
 
   // ── Delete (soft-delete: deleted=true, disappears from listing) ────────────
   const handleConfirmDelete = async () => {
@@ -587,11 +566,7 @@ export default function DocumentManagement() {
       await documentService.delete(deleteTarget.id)
       toast.success(`"${deleteTarget.name}" has been deleted`, 'Deleted')
       setDeleteTarget(null)
-      // If we just deleted the last item on a non-first page, go back one page
-      const remainingOnPage = docs.length - 1
-      const targetPage = remainingOnPage === 0 && page > 0 ? page - 1 : page
-      setPage(targetPage)
-      fetchDocs(targetPage, toEnumTypes(activeFilters))
+      fetchDocs()
       fetchStats()
     } catch (err) {
       toast.error(err?.message ?? 'Failed to delete document', 'Delete Failed')
@@ -600,14 +575,38 @@ export default function DocumentManagement() {
     }
   }
 
-  // ── Client-side search within current page ─────────────────────────────────
+  // ── Client-side search and filtering ───────────────────────────────────────
   const filteredDocs = useMemo(() => {
-    if (!search.trim()) return docs
-    const q = search.toLowerCase()
-    return docs.filter((d) =>
-      d.name?.toLowerCase().includes(q) || d.key?.toLowerCase().includes(q)
-    )
-  }, [docs, search])
+    const q = search.toLowerCase().trim()
+    const appTypes = activeFilters.applicableTypes ?? []
+    const appTypesEnums = appTypes.map((t) => FILTER_LABEL_TO_ENUM[t]).filter(Boolean)
+
+    return allDocs.filter((d) => {
+      const textMatch = !q ||
+        d.name?.toLowerCase().includes(q) ||
+        d.key?.toLowerCase().includes(q)
+
+      const statusMatch =
+        statusFilter === 'ALL' ||
+        (statusFilter === 'ACTIVE' && d.active === true) ||
+        (statusFilter === 'INACTIVE' && d.active === false)
+
+      const applicableMatch =
+        !appTypesEnums.length ||
+        appTypesEnums.some((t) => d.applicableTypes?.includes(t))
+
+      return textMatch && statusMatch && applicableMatch
+    })
+  }, [allDocs, search, statusFilter, activeFilters])
+
+  // ── Client-side pagination calculations ────────────────────────────────────
+  const totalElements = filteredDocs.length
+  const totalPages    = Math.max(1, Math.ceil(totalElements / PAGE_SIZE))
+  const safePage      = Math.min(page, totalPages - 1)
+  const pageRows      = filteredDocs.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE)
+
+  // Reset page when search or filters change
+  useEffect(() => { setPage(0) }, [search, statusFilter, activeFilters])
 
   // ─── Render ────────────────────────────────────────────────────────────────
   return (
@@ -649,10 +648,10 @@ export default function DocumentManagement() {
       </div>
 
       {/* ── Toolbar ─────────────────────────────────────────────────────── */}
-      <div className="flex items-center gap-2 mb-4 flex-wrap">
+      <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
         {/* Search */}
         <label
-          className="flex items-center gap-2 bg-white rounded-xl px-3 h-10 border border-gray-200 cursor-text flex-1"
+          className="flex items-center gap-2 bg-white rounded-xl px-3 h-10 border border-gray-200 cursor-text flex-1 min-w-0"
           style={{ maxWidth: 380 }}
         >
           <Search size={13} color="#9CA3AF" strokeWidth={2} className="flex-shrink-0" />
@@ -661,7 +660,7 @@ export default function DocumentManagement() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search by name or key…"
-            className="border-none outline-none text-[13px] text-gray-900 bg-transparent w-full"
+            className="border-none outline-none text-[13px] text-gray-900 bg-transparent w-full min-w-0"
             onFocus={(e) => (e.target.parentElement.style.borderColor = PRIMARY)}
             onBlur={(e)  => (e.target.parentElement.style.borderColor = '#E5E7EB')}
           />
@@ -672,26 +671,55 @@ export default function DocumentManagement() {
           )}
         </label>
 
-        {/* Filter button — opens shared FilterModal */}
-        <button
-          onClick={() => setShowFilter(true)}
-          className="relative flex items-center gap-1.5 bg-white border rounded-lg px-3 h-10 text-[13px] font-medium cursor-pointer hover:bg-gray-50 ml-auto transition-colors"
-          style={{
-            borderColor: filterCount > 0 ? PRIMARY : '#E5E7EB',
-            color:       filterCount > 0 ? PRIMARY : '#374151',
-          }}
-        >
-          <Filter size={13} strokeWidth={2} />
-          <span>Filter</span>
-          {filterCount > 0 && (
-            <span
-              className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full text-[9px] font-bold text-white flex items-center justify-center"
-              style={{ backgroundColor: PRIMARY }}
-            >
-              {filterCount}
-            </span>
-          )}
-        </button>
+        {/* Right tools container: Segmented control + Filter Button */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Status segmented control */}
+          <div className="flex items-center border border-gray-200 rounded-xl p-0.5 bg-gray-50 h-10">
+            {[
+              { label: 'All', value: 'ALL' },
+              { label: 'Active', value: 'ACTIVE' },
+              { label: 'Inactive', value: 'INACTIVE' },
+            ].map((opt) => {
+              const isActive = statusFilter === opt.value
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setStatusFilter(opt.value)}
+                  className={`px-4 h-8 text-[13px] font-semibold rounded-lg transition-all ${
+                    isActive
+                      ? 'bg-white shadow-sm text-gray-950 border border-gray-100'
+                      : 'text-gray-500 hover:text-gray-700'
+                  }`}
+                  style={isActive ? { color: PRIMARY } : {}}
+                >
+                  {opt.label}
+                </button>
+              )
+            })}
+          </div>
+
+          {/* Filter button — opens shared FilterModal for applicableTypes */}
+          <button
+            onClick={() => setShowFilter(true)}
+            className="relative flex items-center gap-1.5 bg-white border border-gray-200 rounded-xl px-3.5 h-10 text-[13px] font-medium cursor-pointer hover:bg-gray-50 transition-colors"
+            style={{
+              borderColor: filterCount > 0 ? PRIMARY : '#E5E7EB',
+              color:       filterCount > 0 ? PRIMARY : '#374151',
+            }}
+          >
+            <Filter size={13} strokeWidth={2} />
+            <span>Filter</span>
+            {filterCount > 0 && (
+              <span
+                className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full text-[9px] font-bold text-white flex items-center justify-center"
+                style={{ backgroundColor: PRIMARY }}
+              >
+                {filterCount}
+              </span>
+            )}
+          </button>
+        </div>
       </div>
 
       {/* ── Table ───────────────────────────────────────────────────────── */}
@@ -716,15 +744,13 @@ export default function DocumentManagement() {
               ) : filteredDocs.length === 0 ? (
                 <tr>
                   <td colSpan={5} className="px-4 py-14 text-center text-sm text-gray-400">
-                    {search
-                      ? `No documents match "${search}"`
-                      : filterCount > 0
-                        ? 'No documents match the selected filters.'
-                        : 'No documents found. Click "Create Document" to add one.'}
+                    {search || filterCount > 0 || statusFilter !== 'ALL'
+                      ? 'No documents match the search or filter.'
+                      : 'No documents found.'}
                   </td>
                 </tr>
               ) : (
-                filteredDocs.map((row, idx) => (
+                pageRows.map((row, idx) => (
                   <tr
                     key={row.id}
                     className="hover:bg-orange-50 transition-colors"
@@ -777,11 +803,11 @@ export default function DocumentManagement() {
 
         {!tableLoading && (
           <Pagination
-            current={page}
+            current={safePage}
             totalElements={totalElements}
             pageSize={PAGE_SIZE}
             totalPages={totalPages}
-            onChange={handlePageChange}
+            onChange={setPage}
           />
         )}
       </div>

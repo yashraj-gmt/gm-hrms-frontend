@@ -1,7 +1,7 @@
 // src/pages/leave/employee/EmployeeLeaveManagement.jsx
 import { useState } from 'react'
 import { CalendarDays, PlusCircle, Wallet, RefreshCw, ChevronRight } from 'lucide-react'
-import { useEmployeeLeave }  from '@/hooks/useEmployeeLeave'
+import { useEmployeeLeave }  from '@/hooks/leave/useEmployeeLeave'
 import MyLeavesTab           from './tabs/MyLeavesTab'
 import ApplyLeaveTab         from './tabs/ApplyLeaveTab'
 import MyBalanceTab          from './tabs/MyBalanceTab'

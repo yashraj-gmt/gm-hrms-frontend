@@ -8,7 +8,7 @@ export default function RoleRoute({ children, route }) {
   const { user } = useAuthStore()
 
   if (!hasRouteAccess(user?.role, route)) {
-    return <Navigate to={ROUTES.UNAUTHORIZED} replace />
+    return <Navigate to={ROUTES.DASHBOARD} replace />
   }
 
   return children

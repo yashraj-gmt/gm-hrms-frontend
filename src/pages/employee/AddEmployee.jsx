@@ -1,18 +1,14 @@
 // src/pages/employee/AddEmployee.jsx
-// Unified page — handles Add, Edit Draft, and Edit (submitted) modes
-// Routes:
-//   /employee/add          → Add mode
-//   /employee/:id/draft    → Edit Draft mode
-//   /employee/:id/edit     → Edit Submitted mode
 
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate, useParams, useLocation } from 'react-router-dom'
-import { Mail, Save, UserPlus, ArrowLeft, Loader2 } from 'lucide-react'
+import { Mail, Save, UserPlus, ArrowLeft, Loader2, ExternalLink, AlertCircle, FileText } from 'lucide-react'
 import { useToast } from '@/components/shared/toast/ToastProvider'
 import employeeService from '@/services/employeeService'
 import apiClient from '@/services/apiClient'
 import shiftService from '@/services/shiftService'
 import SearchableSelect from '@/components/shared/SearchableSelect'
+import { ROUTES } from '@/constants/routes'
 
 const PRIMARY = '#C35E33'
 
@@ -27,10 +23,16 @@ const DOC_MAX_BYTES = DOC_MAX_MB * 1024 * 1024
 const DOC_ALLOWED   = ['application/pdf', 'image/jpeg', 'image/png']
 const DOC_EXT_LIST  = 'PDF, JPG, PNG'
 
+const getFileUrl = (path) => {
+  if (!path) return ''
+  if (path.startsWith('http://') || path.startsWith('https://')) return path
+  return path.startsWith('/') ? path : '/' + path
+}
+
 const EMPLOYMENT_TYPE_ROUTES = {
-  Internship: '/employee/add-intern',
-  Training:   '/employee/add-trainee',
-  Employee:   '/employee/add',
+  Internship: ROUTES.EMPLOYEE_ADD_INTERN,   // '/employee/add-intern'
+  Training:   ROUTES.EMPLOYEE_ADD_TRAINEE,  // '/employee/add-trainee'
+  Employee:   ROUTES.EMPLOYEE_ADD,          // '/employee/add'
 }
 
 // ─── Regex helpers ─────────────────────────────────────────────────────────
@@ -137,7 +139,7 @@ function buildErrors(p, o, emp, addr, bank, docs, reasons, docTypes) {
     docTypes.forEach(dt => {
       if (dt.mandatory) {
         const key       = dt.key || dt.docKey || String(dt.id)
-        const hasFile   = docs[key] instanceof File
+        const hasFile   = docs[key] instanceof File || (docs[key] && (typeof docs[key] === 'string' || docs[key].filePath))
         const hasReason = reasons?.[key]?.trim()
         if (!hasFile && !hasReason)
           errs[`doc_${key}`] = `${dt.name} is required (upload file or provide reason)`
@@ -207,7 +209,7 @@ function SelectInput({ children, value, onChange, error }) {
   )
 }
 
-function PhoneInput({ value, onChange, error }) {
+function PhoneInput({ code = '+91', onCodeChange, value, onChange, error }) {
   const handleChange = (e) => {
     const v = e.target.value.replace(/\D/g, '').slice(0, 10)
     onChange({ target: { value: v } })
@@ -215,9 +217,23 @@ function PhoneInput({ value, onChange, error }) {
   return (
     <>
       <div className="flex h-9">
-        <span className="flex items-center px-2 bg-gray-50 border border-r-0 border-gray-200 rounded-l-lg text-xs text-gray-500 whitespace-nowrap">
-          +91
-        </span>
+        <select
+          value={code}
+          onChange={onCodeChange}
+          className="flex items-center px-1 bg-gray-50 border border-r-0 border-gray-200 rounded-l-lg text-xs text-gray-500 outline-none cursor-pointer"
+        >
+          <option value="+91">+91</option>
+          <option value="+1">+1</option>
+          <option value="+44">+44</option>
+          <option value="+971">+971</option>
+          <option value="+65">+65</option>
+          <option value="+61">+61</option>
+          <option value="+966">+966</option>
+          <option value="+968">+968</option>
+          <option value="+974">+974</option>
+          <option value="+973">+973</option>
+          <option value="+965">+965</option>
+        </select>
         <input
           type="tel"
           inputMode="numeric"
@@ -251,6 +267,30 @@ function RadioOption({ name, value, checked, onChange, label }) {
 }
 
 function ProfilePhotoUpload({ file, onChange, error }) {
+  const [fileError, setFileError] = useState(false)
+
+  useEffect(() => {
+    let active = true
+    if (typeof file === 'string' && file) {
+      const url = getFileUrl(file)
+      fetch(url, { method: 'HEAD' })
+        .then((res) => {
+          if (active) setFileError(!res.ok)
+        })
+        .catch(() => {
+          if (active) setFileError(true)
+        })
+    } else {
+      const timer = setTimeout(() => {
+        if (active) setFileError(false)
+      }, 0)
+      return () => clearTimeout(timer)
+    }
+    return () => {
+      active = false
+    }
+  }, [file])
+
   const handleChange = (e) => {
     const picked = e.target.files?.[0]
     e.target.value = ''
@@ -272,28 +312,183 @@ function ProfilePhotoUpload({ file, onChange, error }) {
       ? file.split('/').pop()
       : null
 
+  const handleView = (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (!file) return
+    if (file instanceof File) {
+      const url = URL.createObjectURL(file)
+      window.open(url, '_blank')
+    } else {
+      window.open(getFileUrl(file), '_blank')
+    }
+  }
+
   return (
     <div>
-      <label className="relative cursor-pointer">
-        <div className={`flex items-center h-9 px-3 bg-gray-50 border rounded-lg hover:bg-gray-100 transition-colors ${
-          error ? 'border-red-400' : 'border-gray-200'
-        }`}>
-          <span className="text-sm text-gray-400 flex-1 truncate">
-            {displayName || 'Choose Photo'}
-          </span>
-          <div className="w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 ml-2" style={{ backgroundColor: PRIMARY }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
-              <polyline points="17 8 12 3 7 8"/>
-              <line x1="12" y1="3" x2="12" y2="15"/>
-            </svg>
+      <div className="flex items-center gap-2">
+        <label className="relative cursor-pointer flex-1">
+          <div className={`flex items-center h-9 px-3 bg-gray-50 border rounded-lg hover:bg-gray-100 transition-colors ${
+            error ? 'border-red-400' : 'border-gray-200'
+          }`}>
+            <span className="text-sm text-gray-400 flex-1 truncate">
+              {displayName || 'Choose Photo'}
+            </span>
+            <div className="w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 ml-2" style={{ backgroundColor: PRIMARY }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                <polyline points="17 8 12 3 7 8"/>
+                <line x1="12" y1="3" x2="12" y2="15"/>
+              </svg>
+            </div>
           </div>
-        </div>
-        <input type="file" className="hidden" accept={PROFILE_PHOTO_ALLOWED.join(',')} onChange={handleChange} />
-      </label>
+          <input type="file" className="hidden" accept={PROFILE_PHOTO_ALLOWED.join(',')} onChange={handleChange} />
+        </label>
+
+        {file && (
+          <button
+            type="button"
+            onClick={handleView}
+            className="h-9 px-3 border border-gray-200 rounded-lg text-xs font-semibold hover:bg-gray-50 flex items-center justify-center gap-1.5 transition-colors"
+            style={{ color: PRIMARY, borderColor: '#E5E7EB' }}
+            title="View photo"
+          >
+            <ExternalLink size={12} />
+          </button>
+        )}
+      </div>
       <p className="text-[10px] text-gray-400 mt-0.5 leading-relaxed">
         Formats: {PROFILE_PHOTO_EXT_LIST} · Max {PROFILE_PHOTO_MAX_MB} MB
       </p>
+      {fileError && (
+        <p className="text-[10px] text-red-500 font-semibold mt-0.5">
+          File not found (unable to open the file)
+        </p>
+      )}
+      <ErrorMsg msg={error} />
+    </div>
+  )
+}
+
+function DocumentUploadRow({ dt, file, reason, error, onFileChange, onReasonChange }) {
+  const [fileError, setFileError] = useState(false)
+
+  useEffect(() => {
+    let active = true
+    const filePath = file && !(file instanceof File) ? file.filePath : null
+    if (filePath) {
+      const url = getFileUrl(filePath)
+      fetch(url, { method: 'HEAD' })
+        .then((res) => {
+          if (active) setFileError(!res.ok)
+        })
+        .catch(() => {
+          if (active) setFileError(true)
+        })
+    } else {
+      const timer = setTimeout(() => {
+        if (active) setFileError(false)
+      }, 0)
+      return () => clearTimeout(timer)
+    }
+    return () => {
+      active = false
+    }
+  }, [file])
+
+  const handleView = (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (!file) return
+    if (file instanceof File) {
+      const url = URL.createObjectURL(file)
+      window.open(url, '_blank')
+    } else if (file.filePath) {
+      window.open(getFileUrl(file.filePath), '_blank')
+    }
+  }
+
+  const displayName = file instanceof File
+    ? file.name
+    : file && typeof file === 'object' && file.name
+      ? file.name
+      : 'Choose File'
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <FieldLabel required={dt.mandatory}>
+        {dt.name}
+        {dt.mandatory && (
+          <span className="ml-1.5 text-[10px] font-normal text-gray-400">(mandatory)</span>
+        )}
+      </FieldLabel>
+
+      <div className="flex items-center gap-2">
+<label className="relative cursor-pointer flex-1 min-w-0">
+            <div className={`flex items-center h-9 px-3 bg-gray-50 border rounded-lg hover:bg-gray-100 transition-colors ${
+            error ? 'border-red-400' : 'border-gray-200'
+          }`}>
+            <span className="text-sm text-gray-400 flex-1 truncate min-w-0">
+              {displayName}
+            </span>
+            <div className="w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 ml-2"
+              style={{ backgroundColor: PRIMARY }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white"
+                strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                <polyline points="17 8 12 3 7 8"/>
+                <line x1="12" y1="3" x2="12" y2="15"/>
+              </svg>
+            </div>
+          </div>
+          <input type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png"
+            onChange={e => {
+              const picked = e.target.files?.[0]
+              e.target.value = ''
+              if (!picked) return
+              if (!DOC_ALLOWED.includes(picked.type)) {
+                onFileChange(null, `Invalid format. Allowed: ${DOC_EXT_LIST}`)
+                return
+              }
+              if (picked.size > DOC_MAX_BYTES) {
+                onFileChange(null, `File too large. Max ${DOC_MAX_MB} MB`)
+                return
+              }
+              onFileChange(picked, null)
+            }}
+          />
+        </label>
+
+        {file && (
+          <button
+            type="button"
+            onClick={handleView}
+            className="h-9 px-3 border border-gray-200 rounded-lg text-xs font-semibold hover:bg-gray-50 flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap"
+            style={{ color: PRIMARY, borderColor: '#E5E7EB' }}
+            title="View document"
+          >
+            <ExternalLink size={12} />
+          </button>
+        )}
+      </div>
+
+      <p className="text-[10px] text-gray-400 -mt-0.5">{DOC_EXT_LIST} · Max {DOC_MAX_MB} MB</p>
+
+      {fileError && (
+        <p className="text-[10px] text-red-500 font-semibold -mt-1">
+          File not found (unable to open the file)
+        </p>
+      )}
+
+      {!file && (
+        <input type="text" placeholder="Reason if document unavailable" value={reason}
+          onChange={e => onReasonChange(e.target.value)}
+          className={`w-full h-8 px-2.5 text-xs text-gray-600 bg-gray-50 border rounded-lg outline-none transition-colors ${
+            error ? 'border-red-400' : 'border-gray-200 focus:border-[#C35E33]'
+          }`}
+        />
+      )}
+
       <ErrorMsg msg={error} />
     </div>
   )
@@ -420,7 +615,8 @@ export default function AddEmployee() {
   // ── Form state ────────────────────────────────────────────────────────────
   const [personal, setPersonal] = useState({
     firstName: '', middleName: '', lastName: '', gender: '',
-    dob: '', personalPhone: '', emergencyPhone: '', personalEmail: '',
+    dob: '', personalPhone: '', personalPhoneCode: '+91',
+    emergencyPhone: '', emergencyPhoneCode: '+91', personalEmail: '',
     maritalStatus: '', spouseName: '', profilePhoto: null,
   })
 
@@ -456,6 +652,31 @@ export default function AddEmployee() {
 
   const [documents,  setDocuments]  = useState({})
   const [docReasons, setDocReasons] = useState({})
+
+  // FIX: load existing documents when editing so they show in the Documents section
+  async function loadExistingDocuments(personalInformationId) {
+    try {
+      const res = await apiClient.get(`/persons/${personalInformationId}/documents`)
+      const docs = res?.data?.data ?? res?.data ?? []
+      if (Array.isArray(docs)) {
+        const reasonMap = {}
+        const docsMap = {}
+        docs.forEach(doc => {
+          const key = doc.documentTypeKey ?? doc.docKey ?? String(doc.documentTypeId ?? doc.id)
+          if (doc.filePath) {
+            docsMap[key] = { id: doc.id, name: doc.filePath.split('/').pop(), filePath: doc.filePath }
+          }
+          if (doc.reason) {
+            reasonMap[key] = doc.reason
+          }
+        })
+        setDocReasons(reasonMap)
+        setDocuments(docsMap)
+      }
+    } catch {
+      // Non-fatal — edit continues without pre-filled reasons
+    }
+  }
 
   // ── Load dropdowns ────────────────────────────────────────────────────────
   useEffect(() => {
@@ -529,7 +750,9 @@ export default function AddEmployee() {
           dob:           emp.dateOfBirth            ?? '',
           // FIX: personal phone, emergency phone, personal email from contact
           personalPhone: contact.personalPhone      ?? '',
+          personalPhoneCode: contact.personalPhoneCode  ?? '+91',
           emergencyPhone:contact.emergencyPhone     ?? '',
+          emergencyPhoneCode: contact.emergencyPhoneCode ?? '+91',
           personalEmail: contact.personalEmail      ?? '',
           maritalStatus: emp.maritalStatus          ?? '',
           spouseName:    emp.spouseOrParentName     ?? '',
@@ -627,59 +850,40 @@ export default function AddEmployee() {
     if (isAddMode) return  // not needed in add mode
     if (!office.designation && !office.department && !office.workLocation && !office.shiftName) return
 
-    setOffice(prev => {
-      const updated = { ...prev }
+    const timer = setTimeout(() => {
+      setOffice(prev => {
+        const updated = { ...prev }
 
-      // Resolve designationId from name
-      if (prev.designation && !prev.designationId && designations.length > 0) {
-        const match = designations.find(d => d.name === prev.designation)
-        if (match) updated.designationId = match.id
-      }
+        // Resolve designationId from name
+        if (prev.designation && !prev.designationId && designations.length > 0) {
+          const match = designations.find(d => d.name === prev.designation)
+          if (match) updated.designationId = match.id
+        }
 
-      // Resolve departmentId from name
-      if (prev.department && !prev.departmentId && departments.length > 0) {
-        const match = departments.find(d => d.name === prev.department)
-        if (match) updated.departmentId = match.id
-      }
+        // Resolve departmentId from name
+        if (prev.department && !prev.departmentId && departments.length > 0) {
+          const match = departments.find(d => d.name === prev.department)
+          if (match) updated.departmentId = match.id
+        }
 
-      // Resolve workLocationId from branchName
-      if (prev.workLocation && !prev.workLocationId && branches.length > 0) {
-        const match = branches.find(b => b.branchName === prev.workLocation)
-        if (match) updated.workLocationId = match.id
-      }
+        // Resolve workLocationId from branchName
+        if (prev.workLocation && !prev.workLocationId && branches.length > 0) {
+          const match = branches.find(b => b.branchName === prev.workLocation)
+          if (match) updated.workLocationId = match.id
+        }
 
-      // Resolve shiftId from shiftName
-      if (prev.shiftName && !prev.shiftId && shifts.length > 0) {
-        const match = shifts.find(s => s.shiftName === prev.shiftName)
-        if (match) updated.shiftId = match.id
-      }
+        // Resolve shiftId from shiftName
+        if (prev.shiftName && !prev.shiftId && shifts.length > 0) {
+          const match = shifts.find(s => s.shiftName === prev.shiftName)
+          if (match) updated.shiftId = match.id
+        }
 
-      return updated
-    })
-  }, [departments, designations, branches, shifts, isAddMode])
+        return updated
+      })
+    }, 0)
 
-  // FIX: load existing documents when editing so they show in the Documents section
-  const loadExistingDocuments = async (personalInformationId) => {
-    try {
-      const res = await apiClient.get(`/persons/${personalInformationId}/documents`)
-      const docs = res?.data?.data ?? res?.data ?? []
-      if (Array.isArray(docs)) {
-        const reasonMap = {}
-        docs.forEach(doc => {
-          if (doc.reason) {
-            const key = doc.documentTypeKey ?? doc.docKey ?? String(doc.documentTypeId ?? doc.id)
-            reasonMap[key] = doc.reason
-          }
-        })
-        setDocReasons(reasonMap)
-        // Note: we do NOT pre-fill setDocuments with File objects since existing
-        // docs are already saved server-side. The UI will show docType entries
-        // with their saved reason (if any). User can re-upload if needed.
-      }
-    } catch {
-      // Non-fatal — edit continues without pre-filled reasons
-    }
-  }
+    return () => clearTimeout(timer)
+  }, [departments, designations, branches, shifts, isAddMode]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Helpers ───────────────────────────────────────────────────────────────
   const updateField = (setter) => (field) => (e) =>
@@ -745,7 +949,9 @@ export default function AddEmployee() {
       maritalStatus:      personal.maritalStatus ? personal.maritalStatus.toUpperCase() : null,
       spouseOrParentName: personal.spouseName.trim() || null,
       personalPhone:      personal.personalPhone || null,
+      personalPhoneCode:  personal.personalPhoneCode || '+91',
       emergencyPhone:     personal.emergencyPhone || null,
+      emergencyPhoneCode: personal.emergencyPhoneCode || '+91',
       personalEmail:      personal.personalEmail.trim() || null,
       officeEmail:        office.officeEmail.trim() || null,
       workProfile: {
@@ -1028,14 +1234,24 @@ export default function AddEmployee() {
               <div data-error={!!errors.personalPhone}>
                 <FieldLabel required>Personal Phone</FieldLabel>
                 {/* FIX: value mapped from contact.personalPhone in edit load */}
-                <PhoneInput value={personal.personalPhone} error={errors.personalPhone}
-                  onChange={e => { up('personalPhone')(e); clearError('personalPhone') }} />
+                <PhoneInput
+                  code={personal.personalPhoneCode}
+                  onCodeChange={e => { up('personalPhoneCode')(e.target.value) }}
+                  value={personal.personalPhone}
+                  error={errors.personalPhone}
+                  onChange={e => { up('personalPhone')(e); clearError('personalPhone') }}
+                />
               </div>
               <div data-error={!!errors.emergencyPhone}>
                 <FieldLabel required>Emergency Phone</FieldLabel>
                 {/* FIX: value mapped from contact.emergencyPhone in edit load */}
-                <PhoneInput value={personal.emergencyPhone} error={errors.emergencyPhone}
-                  onChange={e => { up('emergencyPhone')(e); clearError('emergencyPhone') }} />
+                <PhoneInput
+                  code={personal.emergencyPhoneCode}
+                  onCodeChange={e => { up('emergencyPhoneCode')(e.target.value) }}
+                  value={personal.emergencyPhone}
+                  error={errors.emergencyPhone}
+                  onChange={e => { up('emergencyPhone')(e); clearError('emergencyPhone') }}
+                />
               </div>
               <div data-error={!!errors.personalEmail}>
                 <FieldLabel required>Personal Email</FieldLabel>
@@ -1492,67 +1708,27 @@ export default function AddEmployee() {
                   const file   = documents[docKey]
                   const reason = docReasons[docKey] ?? ''
                   return (
-                    <div key={docKey} className="flex flex-col gap-1.5">
-                      <FieldLabel required={dt.mandatory}>
-                        {dt.name}
-                        {dt.mandatory && (
-                          <span className="ml-1.5 text-[10px] font-normal text-gray-400">(mandatory)</span>
-                        )}
-                      </FieldLabel>
-
-                      <label className="relative cursor-pointer">
-                        <div className={`flex items-center h-9 px-3 bg-gray-50 border rounded-lg hover:bg-gray-100 transition-colors ${
-                          errors[errKey] ? 'border-red-400' : 'border-gray-200'
-                        }`}>
-                          <span className="text-sm text-gray-400 flex-1 truncate">
-                            {file instanceof File ? file.name : 'Choose File'}
-                          </span>
-                          <div className="w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 ml-2"
-                            style={{ backgroundColor: PRIMARY }}>
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white"
-                              strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
-                              <polyline points="17 8 12 3 7 8"/>
-                              <line x1="12" y1="3" x2="12" y2="15"/>
-                            </svg>
-                          </div>
-                        </div>
-                        <input type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png"
-                          onChange={e => {
-                            const picked = e.target.files?.[0]
-                            e.target.value = ''
-                            if (!picked) return
-                            if (!DOC_ALLOWED.includes(picked.type)) {
-                              setErrors(prev => ({ ...prev, [errKey]: `Invalid format. Allowed: ${DOC_EXT_LIST}` }))
-                              return
-                            }
-                            if (picked.size > DOC_MAX_BYTES) {
-                              setErrors(prev => ({ ...prev, [errKey]: `File too large. Max ${DOC_MAX_MB} MB` }))
-                              return
-                            }
-                            setDocuments(d => ({ ...d, [docKey]: picked }))
-                            setDocReasons(d => ({ ...d, [docKey]: '' }))
-                            clearError(errKey)
-                          }}
-                        />
-                      </label>
-
-                      <p className="text-[10px] text-gray-400 -mt-0.5">{DOC_EXT_LIST} · Max {DOC_MAX_MB} MB</p>
-
-                      {!(file instanceof File) && (
-                        <input type="text" placeholder="Reason if document unavailable" value={reason}
-                          onChange={e => {
-                            setDocReasons(d => ({ ...d, [docKey]: e.target.value }))
-                            clearError(errKey)
-                          }}
-                          className={`w-full h-8 px-2.5 text-xs text-gray-600 bg-gray-50 border rounded-lg outline-none transition-colors ${
-                            errors[errKey] ? 'border-red-400' : 'border-gray-200 focus:border-[#C35E33]'
-                          }`}
-                        />
-                      )}
-
-                      <ErrorMsg msg={errors[errKey]} />
-                    </div>
+                    <DocumentUploadRow
+                      key={docKey}
+                      dt={dt}
+                      file={file}
+                      reason={reason}
+                      error={errors[errKey]}
+                      onFileChange={(picked, validationError) => {
+                        if (validationError) {
+                          setErrors(prev => ({ ...prev, [errKey]: validationError }))
+                          setDocuments(d => ({ ...d, [docKey]: null }))
+                        } else {
+                          setDocuments(d => ({ ...d, [docKey]: picked }))
+                          setDocReasons(d => ({ ...d, [docKey]: '' }))
+                          clearError(errKey)
+                        }
+                      }}
+                      onReasonChange={(val) => {
+                        setDocReasons(d => ({ ...d, [docKey]: val }))
+                        clearError(errKey)
+                      }}
+                    />
                   )
                 })}
               </div>

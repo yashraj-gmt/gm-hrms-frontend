@@ -23,8 +23,7 @@ const AddIntern       = lazy(() => import('@/pages/employee/AddIntern'))
 const AddTrainee      = lazy(() => import('@/pages/employee/AddTrainee'))
 const ViewEmployee    = lazy(() => import('@/pages/employee/ViewEmployee'))
 const ViewTrainee     = lazy(() => import('@/pages/employee/ViewTrainee'))
-
-
+const ViewIntern    = lazy(() => import('@/pages/employee/ViewIntern'))
 
 
 
@@ -115,8 +114,6 @@ export const router = createBrowserRouter([
   },
   {
     path: '/verify-otp',
-    // No PublicRoute here — user may need to refresh mid-flow without being
-    // redirected to dashboard. State guard inside VerifyOTPPage handles this.
     element: s(VerifyOTPPage),
   },
   {
@@ -154,6 +151,11 @@ rr(ROUTES.EMPLOYEE_DRAFT,         AddEmployee),
 rr(ROUTES.EMPLOYEE_TRAINEE_VIEW,  ViewTrainee),
 rr(ROUTES.EMPLOYEE_TRAINEE_EDIT,  AddTrainee),  
 rr(ROUTES.EMPLOYEE_TRAINEE_DRAFT, AddTrainee),  
+
+ // ── Intern view / edit / draft
+rr(ROUTES.EMPLOYEE_INTERN_VIEW,  ViewIntern),
+rr(ROUTES.EMPLOYEE_INTERN_EDIT,  AddIntern),
+rr(ROUTES.EMPLOYEE_INTERN_DRAFT, AddIntern),
 
 
 

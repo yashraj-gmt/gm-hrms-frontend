@@ -204,7 +204,16 @@ export default function EmployeeAttendanceHistory() {
   const [totalElements,setTotalElements]= useState(0)
   const [loading,      setLoading]      = useState(false)
   const [summaryStats, setSummaryStats] = useState({
-    present: 0, absent: 0, halfDay: 0, onLeave: 0, lateCount: 0, totalOT: 0, totalWork: 0,
+    present: 0,
+    absent: 0,
+    halfDay: 0,
+    onLeave: 0,
+    lateCount: 0,
+    totalOT: 0,
+    totalWork: 0,
+    total: 0,
+    currentMonthName: '',
+    currentMonthOT: 0,
   })
 
   // ── Fetch ──────────────────────────────────────────────────────────────────
@@ -230,19 +239,24 @@ export default function EmployeeAttendanceHistory() {
 
   useEffect(() => { fetchHistory() }, [fetchHistory])
 
-  // ── Derive stats from loaded history (approximate — for display) ──────────
+  const fetchSummary = useCallback(async () => {
+    try {
+      const params = {}
+      if (dateFrom) params.from = dateFrom
+      if (dateTo)   params.to   = dateTo
+
+      const res = await attendanceService.getMySummary(params)
+      if (res?.success && res?.data) {
+        setSummaryStats(res.data)
+      }
+    } catch (err) {
+      console.error('Failed to load attendance summary:', err)
+    }
+  }, [dateFrom, dateTo])
+
   useEffect(() => {
-    if (!history.length) return
-    setSummaryStats({
-      present:    history.filter((r) => r.status === 'PRESENT').length,
-      absent:     history.filter((r) => r.status === 'ABSENT').length,
-      halfDay:    history.filter((r) => r.status === 'HALF_DAY').length,
-      onLeave:    history.filter((r) => r.status === 'LEAVE').length,
-      lateCount:  history.filter((r) => (r.lateMinutes || 0) > 0).length,
-      totalOT:    history.reduce((a, r) => a + (r.overtimeMinutes || 0), 0),
-      totalWork:  history.reduce((a, r) => a + (r.workMinutes    || 0), 0),
-    })
-  }, [history])
+    fetchSummary()
+  }, [fetchSummary])
 
   const handleDateFilter = ({ start, end }) => {
     setDateFrom(start ? start.toISOString().slice(0, 10) : '')
@@ -251,11 +265,11 @@ export default function EmployeeAttendanceHistory() {
   }
 
   const tabs = [
-    { key: 'All',      label: 'All',      count: totalElements },
+    { key: 'All',      label: 'All',      count: summaryStats.total },
     { key: 'PRESENT',  label: 'Present',  count: summaryStats.present  },
     { key: 'ABSENT',   label: 'Absent',   count: summaryStats.absent   },
     { key: 'HALF_DAY', label: 'Half Day', count: summaryStats.halfDay  },
-    { key: 'LEAVE', label: 'On Leave', count: summaryStats.onLeave  },
+    { key: 'LEAVE',    label: 'On Leave', count: summaryStats.onLeave  },
   ]
 
   const avgWork = summaryStats.present > 0
@@ -301,10 +315,10 @@ export default function EmployeeAttendanceHistory() {
       {/* ── Summary stats ──────────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
         {[
-          { icon: <CheckCircle2 size={17} color="#15803D" strokeWidth={1.8}/>, bg:'#DCFCE7', label:'Present Days',  value: summaryStats.present,        color:'#15803D', sub:`${totalElements} total` },
+          { icon: <CheckCircle2 size={17} color="#15803D" strokeWidth={1.8}/>, bg:'#DCFCE7', label:'Present Days',  value: summaryStats.present,        color:'#15803D', sub:`${summaryStats.total} total` },
           { icon: <XCircle      size={17} color="#B91C1C" strokeWidth={1.8}/>, bg:'#FEE2E2', label:'Absent Days',   value: summaryStats.absent,         color:'#B91C1C', sub:`${summaryStats.halfDay} half-day` },
           { icon: <Activity     size={17} color={PRIMARY} strokeWidth={1.8}/>, bg:PRIMARY_LIGHT, label:'Avg Work', value: fmtMins(avgWork),            color:PRIMARY,   sub:'per day' },
-          { icon: <TrendingUp   size={17} color="#7C3AED" strokeWidth={1.8}/>, bg:'#F5F3FF', label:'Total OT',     value: fmtMins(summaryStats.totalOT), color:'#7C3AED', sub:`${summaryStats.lateCount} late arrivals` },
+          { icon: <TrendingUp   size={17} color="#7C3AED" strokeWidth={1.8}/>, bg:'#F5F3FF', label:`${summaryStats.currentMonthName || new Date().toLocaleString('default', { month: 'long' })} Overtime Hours`, value: fmtMins(summaryStats.currentMonthOT), color:'#7C3AED', sub:`${summaryStats.lateCount} late arrivals` },
         ].map(({ icon, bg, label, value, color, sub }) => (
           <div key={label} className="bg-white rounded-2xl border border-gray-100 p-4 flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ backgroundColor:bg }}>{icon}</div>

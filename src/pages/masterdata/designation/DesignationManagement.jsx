@@ -14,11 +14,10 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import {
-  Search, Filter, Plus, ChevronLeft, ChevronRight,
+  Search, Plus, ChevronLeft, ChevronRight,
   MoreVertical, Pencil, Trash2, X, CheckCircle, XCircle,
   Building2, ClipboardList, RefreshCw,
 } from 'lucide-react'
-import FilterModal        from '@/components/shared/FilterModal'
 import { useToast }       from '@/components/shared/toast/ToastProvider'
 import { useAuthStore }   from '@/store/authStore'
 import { ROLES }          from '@/constants/roles'
@@ -26,10 +25,6 @@ import designationService from '@/services/designationService'
 
 const PRIMARY   = '#C35E33'
 const PAGE_SIZE = 10   // ← was 8
-
-const FILTER_CONFIG = [
-  { key: 'status', label: 'Status', type: 'multi', options: ['Active', 'Inactive'] },
-]
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function StatusBadge({ active }) {
@@ -397,8 +392,7 @@ export default function DesignationManagement() {
   const [allRows,       setAllRows]       = useState([])
   const [loading,       setLoading]       = useState(true)
   const [search,        setSearch]        = useState('')
-  const [showFilter,    setShowFilter]    = useState(false)
-  const [activeFilters, setActiveFilters] = useState({})
+  const [statusFilter,  setStatusFilter]  = useState('ALL') // 'ALL' | 'ACTIVE' | 'INACTIVE'
   const [page,          setPage]          = useState(1)
   const [modalMode,     setModalMode]     = useState(null)
   const [editTarget,    setEditTarget]    = useState(null)
@@ -435,25 +429,22 @@ export default function DesignationManagement() {
         d.name.toLowerCase().includes(q) ||
         (d.description ?? '').toLowerCase().includes(q)
 
-      const statusFilter = activeFilters.status ?? []
-      const statusMatch = !statusFilter.length || statusFilter.some((s) => {
-        if (s === 'Active')   return d.active === true
-        if (s === 'Inactive') return d.active === false
-        return true
-      })
+      const statusMatch =
+        statusFilter === 'ALL' ||
+        (statusFilter === 'ACTIVE' && d.active === true) ||
+        (statusFilter === 'INACTIVE' && d.active === false)
+
       return textMatch && statusMatch
     })
-  }, [allRows, search, activeFilters])
+  }, [allRows, search, statusFilter])
 
   // ── Client-side pagination ─────────────────────────────────────────────────
   const totalPages    = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
   const safePage      = Math.min(page, totalPages)
   const pageRows      = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE)
-  const filterCount   = Object.values(activeFilters).filter((v) =>
-    Array.isArray(v) ? v.length > 0 : !!v).length
 
   // Reset to page 1 when search/filter changes
-  useEffect(() => { setPage(1) }, [search, activeFilters])
+  useEffect(() => { setPage(1) }, [search, statusFilter])
 
   // ── CRUD handlers ──────────────────────────────────────────────────────────
   const handleAdd = async (form) => {
@@ -544,9 +535,9 @@ export default function DesignationManagement() {
       </div>
 
       {/* ── Toolbar ─────────────────────────────────────────────────────────── */}
-      <div className="flex items-center gap-2 mb-4 flex-wrap">
+      <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
         {/* Search — grows to fill available space */}
-        <label className="flex items-center gap-2 bg-white rounded-lg px-3 h-9 border border-gray-200 cursor-text flex-1 min-w-0" style={{ maxWidth: 320 }}>
+        <label className="flex items-center gap-2 bg-white rounded-xl px-3 h-10 border border-gray-200 cursor-text flex-1 min-w-0" style={{ maxWidth: 320 }}>
           <Search size={13} color="#9CA3AF" strokeWidth={2} className="flex-shrink-0" />
           <input
             type="text" value={search}
@@ -561,20 +552,31 @@ export default function DesignationManagement() {
           )}
         </label>
 
-        <button
-          onClick={() => setShowFilter(true)}
-          className="relative flex items-center gap-1.5 bg-white border rounded-lg px-3 h-9 text-[13px] font-medium cursor-pointer hover:bg-gray-50 transition-colors flex-shrink-0"
-          style={{ borderColor: filterCount > 0 ? PRIMARY : '#E5E7EB', color: filterCount > 0 ? PRIMARY : '#374151' }}
-        >
-          <Filter size={13} strokeWidth={2} />
-          <span>Filter</span>
-          {filterCount > 0 && (
-            <span
-              className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full text-[9px] font-bold text-white flex items-center justify-center"
-              style={{ backgroundColor: PRIMARY }}
-            >{filterCount}</span>
-          )}
-        </button>
+        {/* Status segmented control */}
+        <div className="flex items-center border border-gray-200 rounded-xl p-0.5 bg-gray-50 h-10">
+          {[
+            { label: 'All', value: 'ALL' },
+            { label: 'Active', value: 'ACTIVE' },
+            { label: 'Inactive', value: 'INACTIVE' },
+          ].map((opt) => {
+            const isActive = statusFilter === opt.value
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => setStatusFilter(opt.value)}
+                className={`px-4 h-8 text-[13px] font-semibold rounded-lg transition-all ${
+                  isActive
+                    ? 'bg-white shadow-sm text-gray-950 border border-gray-100'
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+                style={isActive ? { color: PRIMARY } : {}}
+              >
+                {opt.label}
+              </button>
+            )
+          })}
+        </div>
       </div>
 
       {/* ── Table ───────────────────────────────────────────────────────────── */}
@@ -585,8 +587,8 @@ export default function DesignationManagement() {
               <tr style={{ backgroundColor: PRIMARY }}>
                 {['#', 'Designation Name', 'Roles & Responsibility', 'Status', 'Action'].map((h) => (
                   <th
-                    key={h}
-                    className={`px-4 py-3.5 text-left text-xs font-semibold text-white whitespace-nowrap ${h === 'Action' ? 'text-center' : ''}`}
+                     key={h}
+                     className={`px-4 py-3.5 text-left text-xs font-semibold text-white whitespace-nowrap ${h === 'Action' ? 'text-center' : ''}`}
                   >
                     {h}
                   </th>
@@ -599,7 +601,7 @@ export default function DesignationManagement() {
               {!loading && pageRows.length === 0 && (
                 <tr>
                   <td colSpan={5} className="px-4 py-14 text-center text-sm text-gray-400">
-                    {search || filterCount
+                    {search || statusFilter !== 'ALL'
                       ? 'No designations match your search or filters.'
                       : 'No designations found.'}
                   </td>
@@ -689,14 +691,6 @@ export default function DesignationManagement() {
           onConfirm={handleDelete}
         />
       )}
-
-      <FilterModal
-        isOpen={showFilter}
-        onClose={() => setShowFilter(false)}
-        onApply={(f) => { setActiveFilters(f); setPage(1) }}
-        onReset={() => { setActiveFilters({}); setPage(1) }}
-        config={FILTER_CONFIG}
-      />
     </>
   )
 }

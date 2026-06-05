@@ -5,10 +5,9 @@ import { createPortal } from 'react-dom'
 import {
   Search, Plus, MoreVertical, Pencil, Trash2,
   X, ChevronLeft, ChevronRight, CheckCircle, XCircle,
-  BookOpen, ClipboardList, RefreshCw, AlertCircle, Filter,
+  BookOpen, ClipboardList, RefreshCw, AlertCircle,
 } from 'lucide-react'
 import internCourseService from '@/services/internCourseService'
-import FilterModal         from '@/components/shared/FilterModal'
 import ConfirmModal        from '@/components/shared/ConfirmModal'
 import { useToast }        from '@/components/shared/toast/ToastProvider'
 import { useAuthStore }    from '@/store/authStore'
@@ -16,16 +15,6 @@ import { ROLES }           from '@/constants/roles'
 
 const PRIMARY   = '#C35E33'
 const PAGE_SIZE = 10
-
-// ── Filter config for shared FilterModal ──────────────────────────────────────
-const FILTER_CONFIG = [
-  {
-    key:     'status',
-    label:   'Status',
-    type:    'multi',
-    options: ['Active', 'Inactive'],
-  },
-]
 
 // ─── Status Badge ─────────────────────────────────────────────────────────────
 function StatusBadge({ active }) {
@@ -369,9 +358,7 @@ export default function InternCourseManagement() {
   const canDelete = user?.role === ROLES.ADMIN
 
   // ── Server data ───────────────────────────────────────────────────────────
-  const [courses,       setCourses]       = useState([])
-  const [totalElements, setTotalElements] = useState(0)
-  const [totalPages,    setTotalPages]    = useState(0)
+  const [allCourses,    setAllCourses]    = useState([])
   const [tableLoading,  setTableLoading]  = useState(false)
 
   // ── Stats ─────────────────────────────────────────────────────────────────
@@ -381,16 +368,9 @@ export default function InternCourseManagement() {
   // ── Pagination ────────────────────────────────────────────────────────────
   const [page, setPage] = useState(0)
 
-  // ── Search (client-side) ──────────────────────────────────────────────────
-  const [search, setSearch] = useState('')
-
-  // ── Filter modal ──────────────────────────────────────────────────────────
-  const [showFilter,    setShowFilter]    = useState(false)
-  const [activeFilters, setActiveFilters] = useState({})   // { status: ['Active'] }
-
-  const filterCount = Object.values(activeFilters).filter((v) =>
-    Array.isArray(v) ? v.length > 0 : !!v
-  ).length
+  // ── Search & Filter ───────────────────────────────────────────────────────
+  const [search,        setSearch]        = useState('')
+  const [statusFilter,  setStatusFilter]  = useState('ALL') // 'ALL' | 'ACTIVE' | 'INACTIVE'
 
   // ── Modal state ───────────────────────────────────────────────────────────
   const [modalMode,    setModalMode]    = useState(null)   // 'add' | 'edit'
@@ -399,17 +379,15 @@ export default function InternCourseManagement() {
   const [deleting,     setDeleting]     = useState(false)
 
   // ── Fetch list ────────────────────────────────────────────────────────────
-  const fetchCourses = useCallback(async (currentPage) => {
+  const fetchCourses = useCallback(async () => {
     setTableLoading(true)
     try {
-      const res      = await internCourseService.getAll(currentPage, PAGE_SIZE)
+      const res      = await internCourseService.getAll(0, 9999)
       const pageData = res?.data ?? {}
-      setCourses(pageData.content       ?? [])
-      setTotalElements(pageData.totalElements ?? 0)
-      setTotalPages(pageData.totalPages    ?? 0)
+      setAllCourses(pageData.content ?? [])
     } catch (err) {
       toast.error(err?.message ?? 'Failed to load courses', 'Fetch Error')
-      setCourses([])
+      setAllCourses([])
     } finally {
       setTableLoading(false)
     }
@@ -427,24 +405,13 @@ export default function InternCourseManagement() {
   }, [])
 
   // ── Initial load ──────────────────────────────────────────────────────────
-  useEffect(() => { fetchCourses(0); fetchStats() }, []) // eslint-disable-line
-
-  // ── Pagination ────────────────────────────────────────────────────────────
-  const handlePageChange = (p) => { setPage(p); fetchCourses(p) }
+  useEffect(() => { fetchCourses(); fetchStats() }, [fetchCourses, fetchStats])
 
   // ── Refresh ───────────────────────────────────────────────────────────────
   const handleRefresh = useCallback(() => {
-    fetchCourses(page); fetchStats()
-  }, [fetchCourses, fetchStats, page])
-
-  // ── Filter apply / reset ──────────────────────────────────────────────────
-  const handleApplyFilter = useCallback((filters) => {
-    setActiveFilters(filters)
-  }, [])
-
-  const handleResetFilter = useCallback(() => {
-    setActiveFilters({})
-  }, [])
+    fetchCourses()
+    fetchStats()
+  }, [fetchCourses, fetchStats])
 
   // ── Soft delete ───────────────────────────────────────────────────────────
   const handleConfirmDelete = async () => {
@@ -454,10 +421,7 @@ export default function InternCourseManagement() {
       await internCourseService.delete(deleteTarget.id)
       toast.success(`"${deleteTarget.name}" has been deleted`, 'Deleted')
       setDeleteTarget(null)
-      const remainingOnPage = courses.length - 1
-      const targetPage = remainingOnPage === 0 && page > 0 ? page - 1 : page
-      setPage(targetPage)
-      fetchCourses(targetPage)
+      fetchCourses()
       fetchStats()
     } catch (err) {
       toast.error(err?.message ?? 'Failed to delete course', 'Delete Failed')
@@ -468,7 +432,7 @@ export default function InternCourseManagement() {
 
   // ── Client-side filter: search + status ──────────────────────────────────
   const filteredCourses = useMemo(() => {
-    let list = courses
+    let list = allCourses
 
     if (search.trim()) {
       const q = search.toLowerCase()
@@ -478,16 +442,23 @@ export default function InternCourseManagement() {
       )
     }
 
-    const statusChips = activeFilters.status ?? []
-    if (statusChips.includes('Active') && !statusChips.includes('Inactive')) {
-      list = list.filter((c) => c.active)
-    } else if (statusChips.includes('Inactive') && !statusChips.includes('Active')) {
-      list = list.filter((c) => !c.active)
+    if (statusFilter === 'ACTIVE') {
+      list = list.filter((c) => c.active === true)
+    } else if (statusFilter === 'INACTIVE') {
+      list = list.filter((c) => c.active === false)
     }
-    // if both or neither selected → show all
 
     return list
-  }, [courses, search, activeFilters])
+  }, [allCourses, search, statusFilter])
+
+  // ── Client-side pagination calculations ────────────────────────────────────
+  const totalElements = filteredCourses.length
+  const totalPages    = Math.max(1, Math.ceil(totalElements / PAGE_SIZE))
+  const safePage      = Math.min(page, totalPages - 1)
+  const pageRows      = filteredCourses.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE)
+
+  // Reset page when search or status filter changes
+  useEffect(() => { setPage(0) }, [search, statusFilter])
 
   return (
     <>
@@ -539,24 +510,31 @@ export default function InternCourseManagement() {
           )}
         </label>
 
-        {/* Filter button */}
-        <button
-          onClick={() => setShowFilter(true)}
-          className="relative flex items-center gap-1.5 bg-white border rounded-lg px-3 h-10 text-[13px] font-medium cursor-pointer hover:bg-gray-50 ml-auto transition-colors"
-          style={{
-            borderColor: filterCount > 0 ? PRIMARY : '#E5E7EB',
-            color:       filterCount > 0 ? PRIMARY : '#374151',
-          }}>
-          <Filter size={13} strokeWidth={2} />
-          <span>Filter</span>
-          {filterCount > 0 && (
-            <span
-              className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full text-[9px] font-bold text-white flex items-center justify-center"
-              style={{ backgroundColor: PRIMARY }}>
-              {filterCount}
-            </span>
-          )}
-        </button>
+        {/* Status segmented control */}
+        <div className="flex items-center border border-gray-200 rounded-xl p-0.5 bg-gray-50 h-10">
+          {[
+            { label: 'All', value: 'ALL' },
+            { label: 'Active', value: 'ACTIVE' },
+            { label: 'Inactive', value: 'INACTIVE' },
+          ].map((opt) => {
+            const isActive = statusFilter === opt.value
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => setStatusFilter(opt.value)}
+                className={`px-4 h-8 text-[13px] font-semibold rounded-lg transition-all ${
+                  isActive
+                    ? 'bg-white shadow-sm text-gray-950 border border-gray-100'
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+                style={isActive ? { color: PRIMARY } : {}}
+              >
+                {opt.label}
+              </button>
+            )
+          })}
+        </div>
       </div>
 
       {/* ── Table ─────────────────────────────────────────────── */}
@@ -579,13 +557,13 @@ export default function InternCourseManagement() {
               ) : filteredCourses.length === 0 ? (
                 <tr>
                   <td colSpan={4} className="px-4 py-14 text-center text-sm text-gray-400">
-                    {search || filterCount > 0
+                    {search || statusFilter !== 'ALL'
                       ? 'No courses match your search or filter.'
-                      : 'No courses found. Click "Add Intern Course" to create one.'}
+                      : 'No courses found.'}
                   </td>
                 </tr>
               ) : (
-                filteredCourses.map((row, idx) => (
+                pageRows.map((row, idx) => (
                   <tr key={row.id}
                     className="hover:bg-orange-50 transition-colors"
                     style={{ backgroundColor: idx % 2 === 0 ? '#fff' : '#FAFAFA' }}>
@@ -640,11 +618,11 @@ export default function InternCourseManagement() {
 
         {!tableLoading && (
           <Pagination
-            current={page}
+            current={safePage}
             totalElements={totalElements}
             pageSize={PAGE_SIZE}
             totalPages={totalPages}
-            onChange={handlePageChange}
+            onChange={setPage}
           />
         )}
       </div>
@@ -674,15 +652,6 @@ export default function InternCourseManagement() {
         cancelLabel="Cancel"
         variant="danger"
         loading={deleting}
-      />
-
-      {/* ── Filter Panel (shared FilterModal) ─────────────────── */}
-      <FilterModal
-        isOpen={showFilter}
-        onClose={() => setShowFilter(false)}
-        onApply={handleApplyFilter}
-        onReset={handleResetFilter}
-        config={FILTER_CONFIG}
       />
     </>
   )

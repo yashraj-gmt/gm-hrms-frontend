@@ -2,12 +2,11 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import ReactDOM from 'react-dom'
 import {
-  Search, Filter, Plus, MoreVertical, Pencil, Trash2,
+  Search, Plus, MoreVertical, Pencil, Trash2,
   X, ChevronLeft, ChevronRight, CheckCircle, XCircle,
   Building2, ChevronRight as ChevronRightIcon, Trash,
   RefreshCw, AlertCircle,
 } from 'lucide-react'
-import FilterModal    from '@/components/shared/FilterModal'
 import { useToast }   from '@/components/shared/toast/ToastProvider'
 import { useAuthStore } from '@/store/authStore'
 import { ROLES }        from '@/constants/roles'
@@ -16,16 +15,6 @@ import departmentService from '@/services/departmentService'
 const PRIMARY      = '#C35E33'
 const PRIMARY_DARK = '#A34A24'
 const PAGE_SIZE    = 10   // fix #4: increased from 8 → 10
-
-// ─── Filter config ────────────────────────────────────────────────────────────
-const FILTER_CONFIG = [
-  { key: 'status', label: 'Status', type: 'multi', options: ['Active', 'Inactive'] },
-]
-
-function resolveStatusParam(statusChips) {
-  if (!statusChips?.length || statusChips.length === 2) return undefined
-  return statusChips[0] === 'Active'
-}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const StatusBadge = ({ active }) =>
@@ -571,8 +560,7 @@ export default function DepartmentManagement() {
   // ── UI state ──────────────────────────────────────────────────────────────
   const [search,          setSearch]          = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
-  const [showFilter,      setShowFilter]      = useState(false)
-  const [activeFilters,   setActiveFilters]   = useState({})
+  const [statusFilter,    setStatusFilter]    = useState('ALL') // 'ALL' | 'ACTIVE' | 'INACTIVE'
   const [page,            setPage]            = useState(1)
   const [expandedIds,     setExpandedIds]     = useState(new Set())
 
@@ -587,14 +575,14 @@ export default function DepartmentManagement() {
     return () => clearTimeout(t)
   }, [search])
 
-  useEffect(() => { setPage(1) }, [activeFilters])
+  useEffect(() => { setPage(1) }, [statusFilter])
 
   // ── Fetch ─────────────────────────────────────────────────────────────────
   const fetchDepartments = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
-      const statusParam = resolveStatusParam(activeFilters.status)
+      const statusParam = statusFilter === 'ALL' ? undefined : statusFilter === 'ACTIVE'
       const res = await departmentService.getAll({
         page:   page - 1,
         size:   PAGE_SIZE,
@@ -614,7 +602,7 @@ export default function DepartmentManagement() {
     } finally {
       setLoading(false)
     }
-  }, [page, debouncedSearch, activeFilters])
+  }, [page, debouncedSearch, statusFilter])
 
   useEffect(() => { fetchDepartments() }, [fetchDepartments])
 
@@ -645,10 +633,6 @@ export default function DepartmentManagement() {
       setDeleteLoading(false)
     }
   }
-
-  const filterCount = Object.values(activeFilters).filter(
-    (v) => Array.isArray(v) ? v.length > 0 : !!v
-  ).length
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
@@ -695,7 +679,7 @@ export default function DepartmentManagement() {
       </div>
 
       {/* Toolbar — fix #7: refresh removed from here */}
-      <div className="flex items-center gap-2 mb-4 flex-wrap">
+      <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
         <label className="flex items-center gap-2 bg-white rounded-xl px-3 h-10 border border-gray-200 cursor-text flex-1"
           style={{ maxWidth: 420 }}>
           <Search size={13} color="#9CA3AF" strokeWidth={2} className="flex-shrink-0" />
@@ -710,18 +694,31 @@ export default function DepartmentManagement() {
           )}
         </label>
 
-        <button onClick={() => setShowFilter(true)}
-          className="relative flex items-center gap-1.5 bg-white border rounded-lg px-3 h-10 text-[13px] font-medium cursor-pointer hover:bg-gray-50 ml-auto transition-colors"
-          style={{ borderColor: filterCount > 0 ? PRIMARY : '#E5E7EB', color: filterCount > 0 ? PRIMARY : '#374151' }}>
-          <Filter size={13} strokeWidth={2} />
-          <span>Filter</span>
-          {filterCount > 0 && (
-            <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full text-[9px] font-bold text-white flex items-center justify-center"
-              style={{ backgroundColor: PRIMARY }}>
-              {filterCount}
-            </span>
-          )}
-        </button>
+        {/* Status segmented control */}
+        <div className="flex items-center border border-gray-200 rounded-xl p-0.5 bg-gray-50 h-10">
+          {[
+            { label: 'All', value: 'ALL' },
+            { label: 'Active', value: 'ACTIVE' },
+            { label: 'Inactive', value: 'INACTIVE' },
+          ].map((opt) => {
+            const isActive = statusFilter === opt.value
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => setStatusFilter(opt.value)}
+                className={`px-4 h-8 text-[13px] font-semibold rounded-lg transition-all ${
+                  isActive
+                    ? 'bg-white shadow-sm text-gray-950 border border-gray-100'
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+                style={isActive ? { color: PRIMARY } : {}}
+              >
+                {opt.label}
+              </button>
+            )
+          })}
+        </div>
       </div>
 
       {/* Error */}
@@ -881,14 +878,6 @@ export default function DepartmentManagement() {
           onConfirm={handleDelete}
         />
       )}
-
-      <FilterModal
-        isOpen={showFilter}
-        onClose={() => setShowFilter(false)}
-        onApply={(f) => setActiveFilters(f)}
-        onReset={() => setActiveFilters({})}
-        config={FILTER_CONFIG}
-      />
     </>
   )
 }

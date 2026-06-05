@@ -1,11 +1,10 @@
 // src/pages/masterdata/branch/BranchManagement.jsx
 import { useState, useRef, useEffect, useCallback } from 'react'
 import {
-  Search, Filter, Plus, MoreVertical, Pencil, Trash2,
+  Search, Plus, MoreVertical, Pencil, Trash2,
   X, ChevronDown, MapPin, Building, GripVertical, CheckCircle, XCircle,
   Save, RotateCcw, RefreshCw,
 } from 'lucide-react'
-import FilterModal  from '@/components/shared/FilterModal'
 import ConfirmModal from '@/components/shared/ConfirmModal'
 import BranchModal  from './BranchModal'                     
 import { useToast } from '@/components/shared/toast/ToastProvider'
@@ -15,9 +14,6 @@ import branchService from '@/services/branchService'
 
 const PRIMARY      = '#C35E33'
 const PRIMARY_DARK = '#A34A24'
-const FILTER_CONFIG = [
-  { key: 'status', label: 'Status', type: 'multi', options: ['Active', 'Inactive'] },
-]
 
 // ─── Map API node → local tree node 
 const mapApiToLocal = (node) => ({
@@ -79,8 +75,9 @@ function filterTree(nodes, q, statusFilter) {
       || node.city.toLowerCase().includes(q)
       || node.code.toLowerCase().includes(q)
 
-    const statusMatch = !statusFilter?.length
-      || statusFilter.some((s) => (s === 'Active' ? node.active : !node.active))
+    const statusMatch = statusFilter === 'ALL'
+      || (statusFilter === 'ACTIVE' && node.active === true)
+      || (statusFilter === 'INACTIVE' && node.active === false)
 
     const selfMatches = textMatch && statusMatch
 
@@ -322,8 +319,7 @@ export default function BranchManagement() {
 
   // ── UI ─────────────────────────────────────────────────────────────────────
   const [search,           setSearch]           = useState('')
-  const [showFilter,       setShowFilter]       = useState(false)
-  const [activeFilters,    setActiveFilters]    = useState({})
+  const [statusFilter,     setStatusFilter]     = useState('ALL') // 'ALL' | 'ACTIVE' | 'INACTIVE'
   const [expandedIds,      setExpandedIds]      = useState(new Set())
   const [hasUnsavedLayout, setHasUnsavedLayout] = useState(false)
 
@@ -455,15 +451,12 @@ export default function BranchManagement() {
   const countActive = (nodes) => nodes.reduce((a, n) => a + (n.active ? 1 : 0) + countActive(n.children), 0)
   const total  = countAll(tree)
   const active = countActive(tree)
-  const filterCount = Object.values(activeFilters).filter((v) =>
-    Array.isArray(v) ? v.length > 0 : !!v
-  ).length
 
   // ── Recursive filter ────────────────────────────────────────────────────────
   // filterTree handles sub-branch search and status filtering in one pass
   const q            = search.toLowerCase()
-  const filteredTree = (q || activeFilters.status?.length)
-    ? filterTree(tree, q, activeFilters.status)
+  const filteredTree = (q || statusFilter !== 'ALL')
+    ? filterTree(tree, q, statusFilter)
     : tree
 
   // ─── Render ─────────────────────────────────────────────────────────────────
@@ -567,7 +560,7 @@ export default function BranchManagement() {
       </div>
 
       {/* ── Toolbar ───────────────────────────────────────────────────────── */}
-      <div className="flex items-center gap-2 mb-4 flex-wrap">
+      <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
         <label
           className="flex items-center gap-2 bg-white rounded-xl px-3 h-10 border border-gray-200 cursor-text flex-1"
           style={{ maxWidth: 420 }}
@@ -592,25 +585,31 @@ export default function BranchManagement() {
           )}
         </label>
 
-        <button
-          onClick={() => setShowFilter(true)}
-          className="relative flex items-center gap-1.5 bg-white border rounded-lg px-3 h-10 text-[13px] font-medium cursor-pointer hover:bg-gray-50 ml-auto transition-colors"
-          style={{
-            borderColor: filterCount > 0 ? PRIMARY : '#E5E7EB',
-            color:       filterCount > 0 ? PRIMARY : '#374151',
-          }}
-        >
-          <Filter size={13} strokeWidth={2} />
-          <span>Filter</span>
-          {filterCount > 0 && (
-            <span
-              className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full text-[9px] font-bold text-white flex items-center justify-center"
-              style={{ backgroundColor: PRIMARY }}
-            >
-              {filterCount}
-            </span>
-          )}
-        </button>
+        {/* Status segmented control */}
+        <div className="flex items-center border border-gray-200 rounded-xl p-0.5 bg-gray-50 h-10">
+          {[
+            { label: 'All', value: 'ALL' },
+            { label: 'Active', value: 'ACTIVE' },
+            { label: 'Inactive', value: 'INACTIVE' },
+          ].map((opt) => {
+            const isActive = statusFilter === opt.value
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => setStatusFilter(opt.value)}
+                className={`px-4 h-8 text-[13px] font-semibold rounded-lg transition-all ${
+                  isActive
+                    ? 'bg-white shadow-sm text-gray-950 border border-gray-100'
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+                style={isActive ? { color: PRIMARY } : {}}
+              >
+                {opt.label}
+              </button>
+            )
+          })}
+        </div>
       </div>
 
       {/* ── Drag hint ─────────────────────────────────────────────────────── */}
@@ -722,14 +721,6 @@ export default function BranchManagement() {
         loading={savingLayout}
       />
 
-      {/* ── Filter Panel ──────────────────────────────────────────────────── */}
-      <FilterModal
-        isOpen={showFilter}
-        onClose={() => setShowFilter(false)}
-        onApply={(f) => setActiveFilters(f)}
-        onReset={() => setActiveFilters({})}
-        config={FILTER_CONFIG}
-      />
     </>
   )
 }

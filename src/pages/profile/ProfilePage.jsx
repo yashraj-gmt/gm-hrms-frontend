@@ -15,6 +15,7 @@ const BRAND      = '#C35E33'
 const BRAND_DARK = '#A34A24'
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
+// eslint-disable-next-line no-unused-vars
 function Field({ icon: Icon, label, value, editing, name, onChange, type = 'text', readOnly = false }) {
   const active = editing && !readOnly
   return (
@@ -94,6 +95,7 @@ export default function ProfilePage() {
     name:        '',
     email:       '',
     phone:       '',
+    phoneCode:   '+91',
     designation: '',
     department:  '',
     branch:      '',
@@ -129,6 +131,7 @@ const showToast = useCallback((message, type = 'success') => {
           name:        data.fullName    || user?.name        || '',
           email:       data.email       || user?.email       || '',
           phone:       data.phone       || user?.phone       || '',
+          phoneCode:   data.phoneCode   || user?.phoneCode   || '+91',
           designation: data.designation || user?.designation || '',
           department:  data.department  || user?.department  || '',
           branch:      data.branch      || user?.branch      || '',
@@ -142,6 +145,7 @@ const showToast = useCallback((message, type = 'success') => {
           name:        user?.name        || '',
           email:       user?.email       || '',
           phone:       user?.phone       || '',
+          phoneCode:   user?.phoneCode   || '+91',
           designation: user?.designation || '',
           department:  user?.department  || '',
           branch:      user?.branch      || '',
@@ -165,13 +169,18 @@ const showToast = useCallback((message, type = 'success') => {
   const handleSave = async () => {
     setSaving(true)
     try {
-      const res  = await profileService.updateProfile({ name: form.name, phone: form.phone })
+      const res  = await profileService.updateProfile({
+        name: form.name,
+        phone: form.phone,
+        phoneCode: form.phoneCode
+      })
       const data = res?.data ?? res ?? {}
 
       const updated = {
         ...form,
-        name:  data.fullName || form.name,
-        phone: data.phone    || form.phone,
+        name:  data.fullName  || form.name,
+        phone: data.phone     || form.phone,
+        phoneCode: data.phoneCode || form.phoneCode,
       }
       setSaved(updated)
       setForm(updated)
@@ -345,7 +354,60 @@ const showToast = useCallback((message, type = 'success') => {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           {/* editable */}
           <Field icon={User}  label="Full Name" name="name"  value={form.name}  editing={editing} onChange={handleFormChange} />
-          <Field icon={Phone} label="Phone"     name="phone" value={form.phone} editing={editing} onChange={handleFormChange} />
+          
+          {/* Phone Field */}
+          <div className="flex flex-col gap-1">
+            <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Phone</label>
+            <div
+              className="flex items-center gap-3 px-4 h-11 rounded-xl border bg-white transition-colors"
+              style={{ borderColor: editing ? BRAND : '#E5E7EB' }}
+            >
+              <Phone size={16} color={editing ? BRAND : '#9CA3AF'} strokeWidth={2} className="flex-shrink-0" />
+              {editing ? (
+                <>
+                  <select
+                    name="phoneCode"
+                    value={form.phoneCode}
+                    onChange={handleFormChange}
+                    className="bg-transparent outline-none text-sm text-gray-800 font-medium cursor-pointer"
+                  >
+                    <option value="+91">+91</option>
+                    <option value="+1">+1</option>
+                    <option value="+44">+44</option>
+                    <option value="+971">+971</option>
+                    <option value="+65">+65</option>
+                    <option value="+61">+61</option>
+                    <option value="+966">+966</option>
+                    <option value="+968">+968</option>
+                    <option value="+974">+974</option>
+                    <option value="+973">+973</option>
+                    <option value="+965">+965</option>
+                  </select>
+                  <span className="text-gray-300">|</span>
+                  <input
+                    type="tel"
+                    inputMode="numeric"
+                    name="phone"
+                    value={form.phone}
+                    onChange={(e) => {
+                      const v = e.target.value.replace(/\D/g, '').slice(0, 10)
+                      setForm((prev) => ({ ...prev, phone: v }))
+                    }}
+                    placeholder="9876543210"
+                    maxLength={10}
+                    className="flex-1 bg-transparent outline-none text-sm text-gray-800 font-medium placeholder:text-gray-400"
+                  />
+                </>
+              ) : (
+                <input
+                  type="text"
+                  value={`${form.phoneCode || '+91'} ${form.phone || ''}`}
+                  readOnly
+                  className="flex-1 bg-transparent outline-none text-sm text-gray-800 font-medium cursor-default"
+                />
+              )}
+            </div>
+          </div>
           {/* read-only — managed by HR */}
           <Field icon={Mail}      label="Email"       name="email"       value={form.email}       editing={editing} onChange={handleFormChange} readOnly />
           <Field icon={Briefcase} label="Designation" name="designation" value={form.designation} editing={editing} onChange={handleFormChange} readOnly />

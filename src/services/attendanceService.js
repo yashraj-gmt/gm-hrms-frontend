@@ -15,6 +15,9 @@ const attendanceService = {
   getMyHistory: (page = 0, size = 8, params = {}) =>
     apiClient.get('/attendance/my-history', { params: { page, size, ...params } }),
 
+  getMySummary: (params = {}) =>
+    apiClient.get('/attendance/my-summary', { params }),
+
   // ── Admin views ───────────────────────────────────────────────────────────────
   getAll: (page = 0, size = 10, params = {}) =>
     apiClient.get('/attendance', { params: { page, size, ...params } }),
@@ -33,6 +36,11 @@ const attendanceService = {
 
   getCorrectionRequests: (page = 0, size = 10, status = '') =>
     apiClient.get('/attendance/correction-requests', {
+      params: { page, size, ...(status ? { status } : {}) },
+    }),
+
+  getMyCorrectionRequests: (page = 0, size = 10, status = '') =>
+    apiClient.get('/attendance/my-correction-requests', {
       params: { page, size, ...(status ? { status } : {}) },
     }),
 

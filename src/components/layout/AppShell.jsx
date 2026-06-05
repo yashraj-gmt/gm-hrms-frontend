@@ -5,6 +5,8 @@ import Sidebar              from './Sidebar'
 import Header               from './Header'
 import { useUIStore }       from '@/store/uiStore'
 import { PanelLeft, PanelRight } from 'lucide-react'
+import { HugeiconsIcon } from '@hugeicons/react'
+import { PanelLeftCloseIcon, PanelLeftOpenIcon } from '@hugeicons/core-free-icons'
 
 const SIDEBAR_WIDTH         = 240   // must match Sidebar.jsx open width (px)
 const SIDEBAR_COLLAPSED_W   = 0     // closed width — adjust if Sidebar has icon-only mode
@@ -45,9 +47,9 @@ export default function AppShell() {
         onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = '#C35E33')}
       >
         {sidebarOpen
-          ? <PanelLeft  size={16} color="#FFFFFF" strokeWidth={2} />
-          : <PanelRight size={16} color="#FFFFFF" strokeWidth={2} />
-        }
+  ? <HugeiconsIcon icon={PanelLeftCloseIcon} size={16} color="#ffffff" />
+  : <HugeiconsIcon icon={PanelLeftOpenIcon}  size={16} color="#ffffff" />
+}
       </button>
 
       {/* ── Main column: Header + scrollable content saaulig */}

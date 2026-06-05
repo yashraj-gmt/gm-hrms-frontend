@@ -488,7 +488,9 @@ export default function ViewEmployee() {
                   <div>
                     <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400">Personal Phone</p>
                     {/* FIX: use contact.personalPhone */}
-                    <p className="text-sm font-medium text-gray-800">{fmt(personalPhone)}</p>
+                    <p className="text-sm font-medium text-gray-800">
+                      {contact.personalPhoneCode ? `${contact.personalPhoneCode} ` : ''}{fmt(personalPhone)}
+                    </p>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
@@ -496,7 +498,9 @@ export default function ViewEmployee() {
                   <div>
                     <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400">Emergency Phone</p>
                     {/* FIX: use contact.emergencyPhone */}
-                    <p className="text-sm font-medium text-gray-800">{fmt(emergencyPhone)}</p>
+                    <p className="text-sm font-medium text-gray-800">
+                      {contact.emergencyPhoneCode ? `${contact.emergencyPhoneCode} ` : ''}{fmt(emergencyPhone)}
+                    </p>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">

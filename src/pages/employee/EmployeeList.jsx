@@ -49,17 +49,17 @@ function resolveRoute(action, id, type, isDraft = false) {
   switch (action) {
     case 'View':
       if (isTrainee) return ROUTES.EMPLOYEE_TRAINEE_VIEW.replace(':id', id)
-      // if (isIntern) return ROUTES.EMPLOYEE_INTERN_VIEW.replace(':id', id)
+      if (isIntern)  return ROUTES.EMPLOYEE_INTERN_VIEW.replace(':id', id)
       return ROUTES.EMPLOYEE_VIEW.replace(':id', id)
 
     case 'Edit':
-      if (isTrainee) return ROUTES.EMPLOYEE_TRAINEE_EDIT.replace(':id', id)  // ← FIX
-      // if (isIntern) return ROUTES.EMPLOYEE_INTERN_EDIT.replace(':id', id)
+      if (isTrainee) return ROUTES.EMPLOYEE_TRAINEE_EDIT.replace(':id', id)
+      if (isIntern)  return ROUTES.EMPLOYEE_INTERN_EDIT.replace(':id', id)
       return ROUTES.EMPLOYEE_EDIT.replace(':id', id)
 
     case 'Draft':
-      if (isTrainee) return ROUTES.EMPLOYEE_TRAINEE_DRAFT.replace(':id', id) // ← FIX
-      // if (isIntern) return ROUTES.EMPLOYEE_INTERN_DRAFT.replace(':id', id)
+      if (isTrainee) return ROUTES.EMPLOYEE_TRAINEE_DRAFT.replace(':id', id)
+      if (isIntern)  return ROUTES.EMPLOYEE_INTERN_DRAFT.replace(':id', id)
       return ROUTES.EMPLOYEE_DRAFT.replace(':id', id)
 
     default:
@@ -756,10 +756,7 @@ export default function EmployeeList() {
                       }
                     </td>
                     <td className="px-3.5 py-3 border-b border-gray-50" onClick={e => e.stopPropagation()}>
-                      {/*
-                        ✅ FIX: Pass employeeType={emp.rawType} so ActionDropdown can forward
-                        it through onView/onEdit/onEditDraft → resolveRoute picks correct page.
-                      */}
+                      
                       <ActionDropdown
                         employeeId={emp.id}
                         employeeType={emp.rawType}
@@ -827,13 +824,6 @@ function formatDate(dateStr) {
   } catch { return dateStr }
 }
 
-/**
- * Normalise a raw API employee record into the shape the table needs.
- *
- * KEY ADDITION: `rawType` preserves the original API employmentType value
- * ('EMPLOYEE' | 'INTERN' | 'TRAINEE') so resolveRoute() can branch correctly
- * without depending on display-label string matching.
- */
 function normaliseEmployee(item) {
   return {
     id:              item.id,

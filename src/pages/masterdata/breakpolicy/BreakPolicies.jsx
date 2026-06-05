@@ -18,11 +18,10 @@ const PRIMARY_DARK  = '#A34A24'
 const PRIMARY_LIGHT = '#FDE8DD'
 const PAGE_SIZE     = 10
 
-// Filter config — Status removed (all listed records are active; inactive hidden via soft-delete)
+// Filter config
 const FILTER_CONFIG = [
   { key: 'category',  label: 'Category',   type: 'multi', options: ['Fixed', 'Flexible']  },
   { key: 'breakType', label: 'Break Type', type: 'multi', options: ['Paid', 'Unpaid']      },
-  { key: 'status',    label: 'Status',     type: 'multi', options: ['Active', 'Inactive']  },
 ]
 
 // ─── Field mapping helpers ────────────────────────────────────────────────────
@@ -119,7 +118,7 @@ function CategoryBadge({ category }) {
 }
 
 // ─── Three-dots Action Menu ───────────────────────────────────────────────────
-function ActionMenu({ row, onEdit, onDelete, canDelete, openUpward }) {
+function ActionMenu({ onEdit, onDelete, canDelete, openUpward }) {
   const [open, setOpen] = useState(false)
   const ref = useRef(null)
 
@@ -628,6 +627,7 @@ export default function BreakPolicies() {
   const [debouncedQ,    setDebouncedQ]    = useState('')
   const [showFilter,    setShowFilter]    = useState(false)
   const [activeFilters, setActiveFilters] = useState({})
+  const [statusFilter,  setStatusFilter]  = useState('ALL') // 'ALL' | 'ACTIVE' | 'INACTIVE'
   const [page,          setPage]          = useState(1)
 
   const [showForm,      setShowForm]      = useState(false)
@@ -641,7 +641,7 @@ export default function BreakPolicies() {
     return () => clearTimeout(t)
   }, [search])
 
-  useEffect(() => { setPage(1) }, [activeFilters])
+  useEffect(() => { setPage(1) }, [activeFilters, statusFilter])
 
   // ── Derive API params from active filters ──────────────────────────────────
   const categoryParam = useMemo(() => {
@@ -650,11 +650,10 @@ export default function BreakPolicies() {
     return cats[0].toUpperCase()
   }, [activeFilters.category])
 
-const isActiveParam = useMemo(() => {
-  const st = activeFilters.status
-  if (!st?.length || st.length === 2) return undefined   // both selected = no filter
-  return st[0] === 'Active'
-}, [activeFilters.status])
+  const isActiveParam = useMemo(() => {
+    if (statusFilter === 'ALL') return undefined
+    return statusFilter === 'ACTIVE'
+  }, [statusFilter])
 
   const isPaidParam = useMemo(() => {
     const bt = activeFilters.breakType
@@ -684,7 +683,7 @@ const isActiveParam = useMemo(() => {
     } finally {
       setLoading(false)
     }
-  }, [page, debouncedQ, categoryParam, isPaidParam])
+  }, [page, debouncedQ, categoryParam, isPaidParam, isActiveParam])
 
   useEffect(() => { fetchPolicies() }, [fetchPolicies])
 
@@ -780,42 +779,78 @@ const isActiveParam = useMemo(() => {
       </div>
 
       {/* ── Toolbar (search + filter only; refresh is in header) ─────────────── */}
-      <div className="flex items-center gap-3 mb-4 flex-wrap">
+      <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
+        {/* Search */}
         <label
-          className="flex items-center gap-2 bg-white rounded-xl px-4 h-10 border border-gray-200 flex-1 min-w-48 cursor-text"
-          style={{ maxWidth: 420 }}
+          className="flex items-center gap-2 bg-white rounded-xl px-3 h-10 border border-gray-200 cursor-text flex-1 min-w-0"
+          style={{ maxWidth: 380 }}
         >
-          <Search size={14} color="#9CA3AF" />
+          <Search size={13} color="#9CA3AF" strokeWidth={2} className="flex-shrink-0" />
           <input
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search break policies…"
-            className="border-none outline-none text-sm text-gray-900 bg-transparent flex-1 placeholder:text-gray-400"
+            className="border-none outline-none text-[13px] text-gray-900 bg-transparent w-full min-w-0"
+            onFocus={(e) => (e.target.parentElement.style.borderColor = PRIMARY)}
+            onBlur={(e)  => (e.target.parentElement.style.borderColor = '#E5E7EB')}
           />
           {search && (
-            <button onClick={() => setSearch('')}>
-              <X size={13} color="#9CA3AF" />
+            <button onClick={() => setSearch('')} className="flex-shrink-0 text-gray-400 hover:text-gray-600 transition-colors">
+              <X size={12} color="#9CA3AF" />
             </button>
           )}
         </label>
 
-        <button
-          onClick={() => setShowFilter(true)}
-          className="relative flex items-center gap-1.5 bg-white border rounded-xl px-4 h-10 text-sm font-medium cursor-pointer hover:bg-gray-50 transition-colors ml-auto"
-          style={{ borderColor: filterCount > 0 ? PRIMARY : '#E5E7EB', color: filterCount > 0 ? PRIMARY : '#374151' }}
-        >
-          <Filter size={14} strokeWidth={2} />
-          Filter
-          {filterCount > 0 && (
-            <span
-              className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full text-[9px] font-bold text-white flex items-center justify-center"
-              style={{ backgroundColor: PRIMARY }}
-            >
-              {filterCount}
-            </span>
-          )}
-        </button>
+        {/* Right tools container: Segmented control + Filter Button */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Status segmented control */}
+          <div className="flex items-center border border-gray-200 rounded-xl p-0.5 bg-gray-50 h-10">
+            {[
+              { label: 'All', value: 'ALL' },
+              { label: 'Active', value: 'ACTIVE' },
+              { label: 'Inactive', value: 'INACTIVE' },
+            ].map((opt) => {
+              const isActive = statusFilter === opt.value
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setStatusFilter(opt.value)}
+                  className={`px-4 h-8 text-[13px] font-semibold rounded-lg transition-all ${
+                    isActive
+                      ? 'bg-white shadow-sm text-gray-950 border border-gray-100'
+                      : 'text-gray-500 hover:text-gray-700'
+                  }`}
+                  style={isActive ? { color: PRIMARY } : {}}
+                >
+                  {opt.label}
+                </button>
+              )
+            })}
+          </div>
+
+          {/* Filter button — opens shared FilterModal */}
+          <button
+            onClick={() => setShowFilter(true)}
+            className="relative flex items-center gap-1.5 bg-white border border-gray-200 rounded-xl px-3.5 h-10 text-[13px] font-medium cursor-pointer hover:bg-gray-50 transition-colors"
+            style={{
+              borderColor: filterCount > 0 ? PRIMARY : '#E5E7EB',
+              color:       filterCount > 0 ? PRIMARY : '#374151',
+            }}
+          >
+            <Filter size={13} strokeWidth={2} />
+            <span>Filter</span>
+            {filterCount > 0 && (
+              <span
+                className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full text-[9px] font-bold text-white flex items-center justify-center"
+                style={{ backgroundColor: PRIMARY }}
+              >
+                {filterCount}
+              </span>
+            )}
+          </button>
+        </div>
       </div>
 
       {/* ── Error state ──────────────────────────────────────────────────────── */}

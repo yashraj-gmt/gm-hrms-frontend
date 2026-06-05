@@ -12,7 +12,7 @@ export default function ProtectedRoute({ children }) {
   const location        = useLocation()
 
   if (!token || !user) {
-    return <Navigate to={ROUTES.LOGIN} state={{ from: location }} replace />
+    return <Navigate to={ROUTES.LOGIN} replace />
   }
 
   return children
