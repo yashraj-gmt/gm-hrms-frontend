@@ -1,15 +1,49 @@
 // src/pages/masterdata/branch/BranchModal.jsx
 import { useEffect, useRef, useState } from 'react'
-import { X, Building } from 'lucide-react'
+import { X, Building, ChevronDown } from 'lucide-react'
 
-const PRIMARY  = '#C35E33'
+const PRIMARY   = '#C35E33'
 const COUNTRIES = ['India', 'USA', 'UK', 'Canada', 'Australia', 'UAE']
+
+// ─── Input sanitisation helpers ──────────────────────────────────────────────
+/**
+ * Allow only digits (0-9).
+ */
+const numericOnly = (v) => v.replace(/\D/g, '')
+
+/**
+ * Allow only alphabetic characters and spaces.
+ */
+const alphaOnly = (v) => v.replace(/[^a-zA-Z\s]/g, '')
+
+/**
+ * Branch Name / Code – allow letters, digits, spaces and hyphens.
+ * Restricts all other special characters.
+ */
+const alphaNumHyphen = (v) => v.replace(/[^a-zA-Z0-9\s\-]/g, '')
+
+/**
+ * State – same as alphaOnly but kept separate so the label can be different.
+ */
+const alphaOnlyState = (v) => v.replace(/[^a-zA-Z\s]/g, '')
 
 // ─── Field must live OUTSIDE BranchModal so React never remounts it ───────────
 // Defining it inside the function body causes a new component type on every
 // render, which makes React unmount → remount the <input>, stealing focus after
 // the first keystroke.
-function Field({ label, fieldKey, placeholder, required, form, onSetField, errors, loading }) {
+function Field({
+  label,
+  fieldKey,
+  placeholder,
+  required,
+  form,
+  onSetField,
+  errors,
+  loading,
+  sanitize,        // optional (v: string) => string
+  inputMode,       // optional html inputMode attr
+  maxLength,       // optional
+}) {
   return (
     <div>
       <label className="block text-xs font-semibold text-gray-700 mb-1.5">
@@ -17,8 +51,14 @@ function Field({ label, fieldKey, placeholder, required, form, onSetField, error
       </label>
       <input
         type="text"
+        inputMode={inputMode}
+        maxLength={maxLength}
         value={form[fieldKey] ?? ''}
-        onChange={(e) => onSetField(fieldKey, e.target.value)}
+        onChange={(e) => {
+          const raw = e.target.value
+          const val = sanitize ? sanitize(raw) : raw
+          onSetField(fieldKey, val)
+        }}
         placeholder={placeholder}
         disabled={loading}
         className="w-full h-10 px-3.5 text-sm text-gray-800 bg-gray-50 border rounded-xl outline-none placeholder:text-gray-400 transition-colors disabled:opacity-60"
@@ -28,6 +68,162 @@ function Field({ label, fieldKey, placeholder, required, form, onSetField, error
       />
       {errors[fieldKey] && (
         <p className="text-[11px] text-red-500 mt-0.5">⚠ {errors[fieldKey]}</p>
+      )}
+    </div>
+  )
+}
+
+// ─── Country ComboBox – dropdown list + free-text fallback ────────────────────
+// NOTE: The dropdown is rendered via a fixed-position portal so it escapes the
+// modal's overflow:hidden / overflow-y-auto scroll container and never causes
+// the modal body to grow or show an unwanted scrollbar.
+function CountryComboBox({ value, onChange, disabled }) {
+  const [open,     setOpen]     = useState(false)
+  // isTyping tracks whether the user is actively typing; when false (just
+  // opened via chevron / focus) we show ALL countries unfiltered.
+  const [isTyping, setIsTyping] = useState(false)
+  const [inputVal, setInputVal] = useState(value || '')
+  const wrapRef    = useRef(null)
+  const [dropPos,  setDropPos]  = useState({ top: 0, left: 0, width: 0 })
+
+  // Keep local input in sync when parent resets / switches edit↔add
+  useEffect(() => { setInputVal(value || '') }, [value])
+
+  // Recalculate dropdown position whenever it opens
+  useEffect(() => {
+    if (open && wrapRef.current) {
+      const r = wrapRef.current.getBoundingClientRect()
+      setDropPos({ top: r.bottom + 4, left: r.left, width: r.width })
+    }
+  }, [open])
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handler = (e) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) {
+        setOpen(false)
+        setIsTyping(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  // Show all countries when not typing; filter only while the user types
+  const displayList = isTyping
+    ? COUNTRIES.filter((c) => c.toLowerCase().includes(inputVal.toLowerCase()))
+    : COUNTRIES
+
+  const handleInputChange = (e) => {
+    const val = e.target.value.replace(/[^a-zA-Z\s]/g, '')
+    setInputVal(val)
+    onChange(val)
+    setIsTyping(true)
+    setOpen(true)
+  }
+
+  const handleFocus = () => {
+    setIsTyping(false)   // opening fresh – show full list
+    setOpen(true)
+  }
+
+  const handleChevronClick = () => {
+    setIsTyping(false)   // always show full list via chevron
+    setOpen((p) => !p)
+  }
+
+  const handleSelect = (country) => {
+    setInputVal(country)
+    onChange(country)
+    setIsTyping(false)
+    setOpen(false)
+  }
+
+  return (
+    <div ref={wrapRef} style={{ position: 'relative' }}>
+      <label className="block text-xs font-semibold text-gray-700 mb-1.5">Country</label>
+
+      {/* Text input with dropdown toggle */}
+      <div style={{ position: 'relative' }}>
+        <input
+          type="text"
+          value={inputVal}
+          onChange={handleInputChange}
+          onFocus={handleFocus}
+          placeholder="Select or type country"
+          disabled={disabled}
+          className="w-full h-10 px-3.5 pr-8 text-sm text-gray-800 bg-gray-50 border border-gray-200 rounded-xl outline-none placeholder:text-gray-400 transition-colors disabled:opacity-60"
+          onFocusCapture={(e) => { e.target.style.borderColor = PRIMARY }}
+          onBlur={(e) => { e.target.style.borderColor = '#E5E7EB' }}
+        />
+        <button
+          type="button"
+          tabIndex={-1}
+          disabled={disabled}
+          onClick={handleChevronClick}
+          style={{
+            position: 'absolute',
+            right: 8,
+            top: '50%',
+            transform: 'translateY(-50%)',
+            background: 'none',
+            border: 'none',
+            padding: 0,
+            cursor: 'pointer',
+            color: '#6B7280',
+            display: 'flex',
+            alignItems: 'center',
+          }}
+        >
+          <ChevronDown
+            size={15}
+            style={{
+              transform: open ? 'rotate(180deg)' : 'rotate(0deg)',
+              transition: 'transform 0.2s',
+            }}
+          />
+        </button>
+      </div>
+
+      {/* Dropdown – rendered at fixed position to escape modal overflow */}
+      {open && displayList.length > 0 && (
+        <ul
+          style={{
+            position: 'fixed',
+            zIndex: 9999,
+            top:   dropPos.top,
+            left:  dropPos.left,
+            width: dropPos.width,
+            background: '#fff',
+            border: '1px solid #E5E7EB',
+            borderRadius: 12,
+            boxShadow: '0 8px 24px rgba(0,0,0,0.15)',
+            maxHeight: 200,
+            overflowY: 'auto',
+            padding: '4px 0',
+            margin: 0,
+            listStyle: 'none',
+          }}
+        >
+          {displayList.map((c) => (
+            <li
+              key={c}
+              onMouseDown={() => handleSelect(c)}
+              style={{
+                padding: '9px 14px',
+                fontSize: 13,
+                cursor: 'pointer',
+                color: c === value ? PRIMARY : '#374151',
+                fontWeight: c === value ? 600 : 400,
+                backgroundColor: 'transparent',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#FEF3EE' }}
+              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent' }}
+            >
+              {c}
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   )
@@ -100,11 +296,34 @@ export default function BranchModal({ mode, initial, onClose, onSave, loading = 
     setErrors((p) => ({ ...p, [k]: '' }))
   }
 
+  // ── Validation ─────────────────────────────────────────────────────────────
   const validate = () => {
     const e = {}
-    if (!form.name.trim()) e.name = 'Branch name is required'
-    if (!form.code.trim()) e.code = 'Branch code is required'
-    if (!form.city.trim()) e.city = 'City is required'
+
+    // Required fields
+    if (!form.name.trim())    e.name    = 'Branch name is required'
+    if (!form.code.trim())    e.code    = 'Branch code is required'
+    if (!form.city.trim())    e.city    = 'City is required'
+
+    // Format checks
+    if (form.pincode && !/^\d+$/.test(form.pincode))
+      e.pincode = 'Pincode must contain digits only'
+
+    if (form.pincode && (form.pincode.length < 4 || form.pincode.length > 10))
+      e.pincode = 'Pincode must be between 4 and 10 digits'
+
+    if (form.city && !/^[a-zA-Z\s]+$/.test(form.city.trim()))
+      e.city = 'City must contain letters only'
+
+    if (form.district && !/^[a-zA-Z\s]+$/.test(form.district.trim()))
+      e.district = 'District must contain letters only'
+
+    if (form.state && !/^[a-zA-Z\s]+$/.test(form.state.trim()))
+      e.state = 'State must contain letters only'
+
+    if (form.country && !/^[a-zA-Z\s]+$/.test(form.country.trim()))
+      e.country = 'Country must contain letters only'
+
     return e
   }
 
@@ -159,8 +378,22 @@ export default function BranchModal({ mode, initial, onClose, onSave, loading = 
 
             {/* Row 1 – name + code */}
             <div className="grid grid-cols-2 gap-4 mb-4">
-              <Field label="Branch Name" fieldKey="name" placeholder="Enter Branch Name" required {...fieldProps} />
-              <Field label="Branch Code" fieldKey="code" placeholder="GMT001"            required {...fieldProps} />
+              <Field
+                label="Branch Name"
+                fieldKey="name"
+                placeholder="Enter Branch Name"
+                required
+                sanitize={alphaNumHyphen}
+                {...fieldProps}
+              />
+              <Field
+                label="Branch Code"
+                fieldKey="code"
+                placeholder="GMT001"
+                required
+                sanitize={alphaNumHyphen}
+                {...fieldProps}
+              />
             </div>
 
             {/* Row 2 – address + landmark */}
@@ -195,46 +428,53 @@ export default function BranchModal({ mode, initial, onClose, onSave, loading = 
 
             {/* Row 3 – city + district + state */}
             <div className="grid grid-cols-3 gap-4 mb-4">
-              {/* City (required – needs inline error) */}
-              <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1.5">
-                  City <span style={{ color: PRIMARY }}>*</span>
-                </label>
-                <input
-                  type="text"
-                  value={form.city}
-                  onChange={(e) => setField('city', e.target.value)}
-                  placeholder="City"
-                  disabled={loading}
-                  className="w-full h-10 px-3.5 text-sm text-gray-800 bg-gray-50 border rounded-xl outline-none placeholder:text-gray-400 transition-colors disabled:opacity-60"
-                  style={{ borderColor: errors.city ? '#EF4444' : '#E5E7EB' }}
-                  onFocus={(e) => { e.target.style.borderColor = PRIMARY }}
-                  onBlur={(e)  => { e.target.style.borderColor = errors.city ? '#EF4444' : '#E5E7EB' }}
-                />
-                {errors.city && (
-                  <p className="text-[11px] text-red-500 mt-0.5">⚠ {errors.city}</p>
-                )}
-              </div>
-              <Field label="District" fieldKey="district" placeholder="District" {...fieldProps} />
-              <Field label="State"    fieldKey="state"    placeholder="Gujarat"  {...fieldProps} />
+              {/* City (required – uses Field component for validation display) */}
+              <Field
+                label="City"
+                fieldKey="city"
+                placeholder="City"
+                required
+                sanitize={alphaOnly}
+                {...fieldProps}
+              />
+              <Field
+                label="District"
+                fieldKey="district"
+                placeholder="District"
+                sanitize={alphaOnly}
+                {...fieldProps}
+              />
+              <Field
+                label="State"
+                fieldKey="state"
+                placeholder="Gujarat"
+                sanitize={alphaOnlyState}
+                {...fieldProps}
+              />
             </div>
 
             {/* Row 4 – pincode + country + status */}
             <div className="grid grid-cols-3 gap-4">
-              <Field label="Pincode" fieldKey="pincode" placeholder="380054" {...fieldProps} />
+              <Field
+                label="Pincode"
+                fieldKey="pincode"
+                placeholder="380054"
+                sanitize={numericOnly}
+                inputMode="numeric"
+                maxLength={10}
+                {...fieldProps}
+              />
 
+              {/* Country – ComboBox (select OR free-type) */}
               <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1.5">Country</label>
-                <select
+                <CountryComboBox
                   value={form.country}
-                  onChange={(e) => setField('country', e.target.value)}
+                  onChange={(val) => setField('country', val)}
                   disabled={loading}
-                  className="w-full h-10 px-3.5 text-sm text-gray-800 bg-gray-50 border border-gray-200 rounded-xl outline-none appearance-none cursor-pointer transition-colors disabled:opacity-60"
-                  onFocus={(e) => { e.target.style.borderColor = PRIMARY }}
-                  onBlur={(e)  => { e.target.style.borderColor = '#E5E7EB' }}
-                >
-                  {COUNTRIES.map((c) => <option key={c}>{c}</option>)}
-                </select>
+                />
+                {errors.country && (
+                  <p className="text-[11px] text-red-500 mt-0.5">⚠ {errors.country}</p>
+                )}
               </div>
 
               <div>

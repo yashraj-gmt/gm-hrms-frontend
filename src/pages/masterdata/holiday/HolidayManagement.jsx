@@ -202,7 +202,7 @@ function Pagination({ current, total, pageSize, totalPages, onChange }) {
 function SkeletonRow() {
   return (
     <tr className="animate-pulse">
-      {[180, 110, 130, 160, 60, 80, 80, 70].map((w, i) => (
+      {[40, 180, 110, 130, 160, 60, 80, 80, 70].map((w, i) => (
         <td key={i} className="px-5 py-4 border-b border-gray-50">
           <div className="h-4 bg-gray-100 rounded-md" style={{ width: w }} />
         </td>
@@ -644,25 +644,83 @@ export default function HolidayManagement() {
       </div>
 
       {/* ── Stats — global totals, never change with search ─────────────────── */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
-        {[
-          { label: 'Total Holidays',   value: stats.total,    color: '#111827', bg: '#F3F4F6'   },
-          { label: 'Active',           value: stats.active,   color: '#15803D', bg: '#DCFCE7'   },
-          { label: 'Upcoming (90d)',   value: stats.upcoming, color: PRIMARY,   bg: PRIMARY_LIGHT },
-          { label: 'Optional/Flotter', value: stats.optional, color: '#6D28D9', bg: '#F5F3FF'   },
-        ].map(({ label, value, color, bg }) => (
-          <div key={label} className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ backgroundColor: bg }}>
-              <Calendar size={18} color={color} strokeWidth={1.8} />
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-5">
+
+        {/* Total Holidays */}
+        <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ backgroundColor: '#F3F4F6' }}>
+            <Calendar size={18} color="#111827" strokeWidth={1.8} />
+          </div>
+          <div>
+            <p className="text-xl font-bold text-gray-900">{stats.total}</p>
+            <p className="text-[10px] text-gray-500 font-medium">Total Holidays</p>
+          </div>
+        </div>
+
+        {/* Insights — Upcoming ÷ Optional */}
+        <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+          {/* Card header */}
+          <div className="px-4 pt-3 pb-2 border-b border-gray-100 flex items-center gap-2">
+            <div className="w-6 h-6 rounded-lg flex items-center justify-center" style={{ backgroundColor: PRIMARY_LIGHT }}>
+              <Calendar size={13} color={PRIMARY} strokeWidth={1.8} />
             </div>
-            <div>
-              <p className="text-xl font-bold leading-none" style={{ color }}>
-                {value}
-              </p>
-              <p className="text-[10px] text-gray-500 font-medium mt-0.5">{label}</p>
+            <p className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Insights</p>
+          </div>
+          {/* Bifurcated values */}
+          <div className="grid grid-cols-2 divide-x divide-gray-100">
+            <div className="px-4 py-3 flex flex-col items-center gap-0.5">
+              <p className="text-lg font-bold" style={{ color: PRIMARY }}>{stats.upcoming}</p>
+              <span
+                className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
+                style={{ backgroundColor: PRIMARY_LIGHT, color: PRIMARY }}
+              >
+                Upcoming (90d)
+              </span>
+            </div>
+            <div className="px-4 py-3 flex flex-col items-center gap-0.5">
+              <p className="text-lg font-bold" style={{ color: '#6D28D9' }}>{stats.optional}</p>
+              <span
+                className="text-[10px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap"
+                style={{ backgroundColor: '#F5F3FF', color: '#6D28D9' }}
+              >
+                Optional
+              </span>
             </div>
           </div>
-        ))}
+        </div>
+
+        {/* Status — Active ÷ Inactive */}
+        <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+          {/* Card header */}
+          <div className="px-4 pt-3 pb-2 border-b border-gray-100 flex items-center gap-2">
+            <div className="w-6 h-6 rounded-lg flex items-center justify-center" style={{ backgroundColor: '#DCFCE7' }}>
+              <Calendar size={13} color="#15803D" strokeWidth={1.8} />
+            </div>
+            <p className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Status</p>
+          </div>
+          {/* Bifurcated values */}
+          <div className="grid grid-cols-2 divide-x divide-gray-100">
+            <div className="px-4 py-3 flex flex-col items-center gap-0.5">
+              <p className="text-lg font-bold" style={{ color: '#15803D' }}>{stats.active}</p>
+              <span
+                className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
+                style={{ backgroundColor: '#DCFCE7', color: '#15803D' }}
+              >
+                Active
+              </span>
+            </div>
+            <div className="px-4 py-3 flex flex-col items-center gap-0.5">
+              <p className="text-lg font-bold" style={{ color: '#B91C1C' }}>{stats.total - stats.active}</p>
+              <span
+                className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
+                style={{ backgroundColor: '#FEE2E2', color: '#B91C1C' }}
+              >
+                Inactive
+              </span>
+            </div>
+          </div>
+        </div>
+
       </div>
 
       {/* ── Toolbar ──────────────────────────────────────────────────────────── */}
@@ -756,7 +814,7 @@ export default function HolidayManagement() {
           <table className="w-full border-collapse" style={{ minWidth: 900 }}>
             <thead>
               <tr style={{ backgroundColor: PRIMARY }}>
-                {['Holiday Name', 'Holiday Date', 'Holiday Type', 'Description', 'Optional', 'Days Left', 'Status', 'Actions'].map((h) => (
+                {['#', 'Holiday Name', 'Holiday Date', 'Holiday Type', 'Description', 'Optional', 'Days Left', 'Status', 'Actions'].map((h) => (
                   <th
                     key={h}
                     className={`px-5 py-4 text-xs font-semibold text-white whitespace-nowrap ${h === 'Actions' ? 'text-center' : 'text-left'}`}
@@ -772,7 +830,7 @@ export default function HolidayManagement() {
                 : rows.length === 0
                   ? (
                     <tr>
-                      <td colSpan={8} className="px-5 py-14 text-center text-sm text-gray-400">
+                      <td colSpan={9} className="px-5 py-14 text-center text-sm text-gray-400">
                         {search || filterCount
                           ? 'No holidays match your search or filters.'
                           : 'No holidays found. Add your first holiday.'}
@@ -787,19 +845,16 @@ export default function HolidayManagement() {
                         className="hover:bg-orange-50/40 transition-colors"
                         style={{ backgroundColor: idx % 2 === 0 ? '#fff' : '#FAFAFA' }}
                       >
+                        {/* Serial Number */}
+                        <td className="px-5 py-4 border-b border-gray-50 text-sm font-semibold text-gray-900 whitespace-nowrap">
+                          {(page - 1) * PAGE_SIZE + idx + 1}
+                        </td>
+
                         {/* Name */}
                         <td className="px-5 py-4 border-b border-gray-50">
-                          <div className="flex items-center gap-2.5">
-                            <div
-                              className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
-                              style={{ backgroundColor: typeBg(row.holidayType) }}
-                            >
-                              <HolidayIcon value={row.holidayType} />
-                            </div>
-                            <span className="text-sm font-semibold text-gray-900 whitespace-nowrap">
-                              {row.holidayName}
-                            </span>
-                          </div>
+                          <span className="text-sm font-semibold text-gray-900 whitespace-nowrap">
+                            {row.holidayName}
+                          </span>
                         </td>
 
                         {/* Date */}

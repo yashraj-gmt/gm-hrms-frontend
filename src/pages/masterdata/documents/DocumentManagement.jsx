@@ -404,8 +404,10 @@ function TableSkeleton() {
   return Array.from({ length: 6 }).map((_, i) => (
     <tr key={i} className="animate-pulse">
       <td className="px-5 py-4 border-b border-gray-50">
+        <div className="h-3.5 w-6 bg-gray-200 rounded" />
+      </td>
+      <td className="px-5 py-4 border-b border-gray-50">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-gray-100" />
           <div>
             <div className="h-3 w-28 bg-gray-200 rounded mb-1.5" />
             <div className="h-2 w-16 bg-gray-100 rounded" />
@@ -728,7 +730,7 @@ export default function DocumentManagement() {
           <table className="w-full border-collapse" style={{ minWidth: 700 }}>
             <thead>
               <tr style={{ backgroundColor: PRIMARY }}>
-                {['Document Name', 'Key', 'Applicable For', 'Status', 'Action'].map((h) => (
+                {['#', 'Document Name', 'Key', 'Applicable For', 'Status', 'Action'].map((h) => (
                   <th
                     key={h}
                     className={`px-5 py-3.5 text-left text-xs font-semibold text-white whitespace-nowrap ${h === 'Action' ? 'text-center' : ''}`}
@@ -743,7 +745,7 @@ export default function DocumentManagement() {
                 <TableSkeleton />
               ) : filteredDocs.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-4 py-14 text-center text-sm text-gray-400">
+                  <td colSpan={6} className="px-4 py-14 text-center text-sm text-gray-400">
                     {search || filterCount > 0 || statusFilter !== 'ALL'
                       ? 'No documents match the search or filter.'
                       : 'No documents found.'}
@@ -756,14 +758,13 @@ export default function DocumentManagement() {
                     className="hover:bg-orange-50 transition-colors"
                     style={{ backgroundColor: idx % 2 === 0 ? '#fff' : '#FAFAFA' }}
                   >
+                    {/* Serial Number */}
+                    <td className="px-5 py-4 border-b border-gray-50 text-[13px] font-semibold text-gray-900 whitespace-nowrap">
+                      {safePage * PAGE_SIZE + idx + 1}
+                    </td>
+
                     <td className="px-5 py-4 border-b border-gray-50">
                       <div className="flex items-center gap-3">
-                        <div
-                          className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
-                          style={{ backgroundColor: row.active ? '#FDE8DD' : '#F3F4F6' }}
-                        >
-                          <FileText size={15} color={row.active ? PRIMARY : '#9CA3AF'} />
-                        </div>
                         <div>
                           <p className="text-[13px] font-semibold text-gray-900 leading-none">{row.name}</p>
                           <p className="text-[10px] text-gray-400 mt-0.5">

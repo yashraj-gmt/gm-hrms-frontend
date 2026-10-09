@@ -46,9 +46,6 @@ const toLocalDatetimeValue = (dt) => {
 
 const localDatetimeToISO = (val) => {
   if (!val) return null
-  // datetime-local gives "YYYY-MM-DDTHH:mm" — append seconds for Java LocalDateTime.
-  // Do NOT use new Date(val).toISOString() as that converts to UTC,
-  // but the backend uses LocalDateTime which has no timezone.
   return val.length === 16 ? val + ':00' : val
 }
 

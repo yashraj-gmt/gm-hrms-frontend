@@ -26,14 +26,13 @@ const MASTER_ITEMS = [
   { label: 'Holiday',      icon: CalendarDays,   route: ROUTES.HOLIDAY      },
 ]
 
-// NAV_ITEMS 
 const NAV_ITEMS = [
   { label: 'Dashboard',           icon: LayoutDashboard, route: ROUTES.DASHBOARD       },
   { label: 'Employee',            icon: UserRound,       route: ROUTES.EMPLOYEE        },
   { label: 'Attendance',          icon: CalendarClock,   route: ROUTES.ATTENDANCE      },
-  { label: 'Attendance', icon: CalendarClock, route: ROUTES.ATTENDANCE_EMPLOYEE }, 
+  { label: 'Attendance',          icon: CalendarClock,   route: ROUTES.ATTENDANCE_EMPLOYEE },
   { label: 'Shift Management',    icon: Clock,           route: ROUTES.SHIFT           },
-  { label: 'Leave Management',    icon: CalendarX2,      route: ROUTES.LEAVE           }, 
+  { label: 'Leave Management',    icon: CalendarX2,      route: ROUTES.LEAVE           },
   { label: 'Leave Management',    icon: CalendarX2,      route: ROUTES.LEAVE_EMPLOYEE  },
   { label: 'Roles & Permissions', icon: ShieldCheck,     route: ROUTES.ROLES           },
   { label: 'Project',             icon: FolderKanban,    route: ROUTES.PROJECTS        },
@@ -41,7 +40,7 @@ const NAV_ITEMS = [
   { label: '__master__',          icon: Database,        route: '__master__'           },
   { label: 'Report',              icon: FileText,        route: ROUTES.REPORTS         },
   { label: 'Payroll',             icon: Wallet,          route: ROUTES.PAYROLL         },
-  { label: 'My Shift', icon: Clock, route: ROUTES.SHIFT_EMPLOYEE },
+  { label: 'My Shift',            icon: Clock,           route: ROUTES.SHIFT_EMPLOYEE  },
 ]
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -141,23 +140,34 @@ function MasterDataGroup() {
 }
 
 // ─── Sidebar panel ────────────────────────────────────────────────────────────
-function SidebarPanel({ items }) {
+function SidebarPanel({ items, isMobile, setSidebarOpen }) {
   return (
     <div style={{
       display: 'flex', flexDirection: 'column',
       height: '100%', width: SIDEBAR_W, backgroundColor: BRAND,
     }}>
-      {/* Logo */}
+      {/* Logo — clicks navigate to Dashboard */}
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         height: 100, backgroundColor: '#fff',
         borderBottom: '1px solid #f0f0f0', flexShrink: 0,
         borderRadius: '0 0 20px 20px',
       }}>
-        <img
-          src={logo} alt="HRMS"
-          style={{ height: 85, width: 'auto', objectFit: 'contain', filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.12))' }}
-        />
+        <NavLink
+          to={ROUTES.DASHBOARD}
+          onClick={() => isMobile && setSidebarOpen(false)}
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+        >
+          <img
+            src={logo}
+            alt="HRMS"
+            style={{
+              height: 85, width: 'auto', objectFit: 'contain',
+              filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.12))',
+              cursor: 'pointer',
+            }}
+          />
+        </NavLink>
       </div>
 
       {/* Nav */}
@@ -166,7 +176,7 @@ function SidebarPanel({ items }) {
         scrollbarWidth: 'thin', scrollbarColor: 'rgba(255,255,255,0.2) transparent',
       }}>
         {items.map((item, idx) => {
-          const isLast     = idx === items.length - 1
+          const isLast      = idx === items.length - 1
           const showDivider = !isLast
 
           // ── Master Data collapsible
@@ -188,8 +198,8 @@ function SidebarPanel({ items }) {
                 end={item.route === ROUTES.DASHBOARD}
                 style={({ isActive }) => ({
                   display: 'flex', alignItems: 'center', gap: 12,
-                  width: '100%', padding: '11px 16px', 
-                   borderTopLeftRadius: 2,
+                  width: '100%', padding: '11px 16px',
+                  borderTopLeftRadius: 2,
                   borderBottomLeftRadius: 2,
                   borderTopRightRadius: 16,
                   borderBottomRightRadius: 16,
@@ -239,11 +249,9 @@ export default function Sidebar() {
     const h = () => setIsMobile(window.innerWidth < MOBILE_BP)
     window.addEventListener('resize', h)
     return () => window.removeEventListener('resize', h)
-  }, [])  
+  }, [])
 
   const filteredItems = NAV_ITEMS.filter((item) => {
-    // '__master__' sentinel: only show when the user can access ≥ 1 child
-    // → automatically hidden for EMPLOYEE / INTERN / TRAINEE (no master routes in their perms)
     if (item.route === '__master__') {
       return MASTER_ITEMS.some((m) => canAccess(m.route))
     }
@@ -277,7 +285,7 @@ export default function Sidebar() {
             transition: 'width 300ms ease-in-out',
           }}
         >
-          <SidebarPanel items={filteredItems} />
+          <SidebarPanel items={filteredItems} isMobile={isMobile} setSidebarOpen={setSidebarOpen} />
         </aside>
       )}
 
@@ -291,7 +299,7 @@ export default function Sidebar() {
             transition: 'transform 300ms ease-in-out',
           }}
         >
-          <SidebarPanel items={filteredItems} />
+          <SidebarPanel items={filteredItems} isMobile={isMobile} setSidebarOpen={setSidebarOpen} />
         </aside>
       )}
     </>

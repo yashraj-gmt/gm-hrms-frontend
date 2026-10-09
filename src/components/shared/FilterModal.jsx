@@ -42,7 +42,7 @@ function Chip({ label, active, onClick }) {
   )
 }
 
-export default function FilterModal({ isOpen, onClose, onApply, onReset, config = [] }) {
+export default function FilterModal({ isOpen, onClose, onApply, onReset, config = [], initialValues = {} }) {
   const overlayRef = useRef(null)
 
   // Build initial state from config
@@ -51,7 +51,7 @@ export default function FilterModal({ isOpen, onClose, onApply, onReset, config 
     config.forEach(({ key, type }) => {
       init[key] = type === 'multi' ? [] : ''
     })
-    return init
+    return { ...init, ...initialValues }
   }
 
   const [values, setValues] = useState(buildInitial)
@@ -59,7 +59,7 @@ export default function FilterModal({ isOpen, onClose, onApply, onReset, config 
   // Reset internal state when modal opens
   useEffect(() => {
     if (isOpen) setValues(buildInitial())
-  }, [isOpen])
+  }, [isOpen, initialValues])
 
   // Close on overlay click
   const handleOverlay = (e) => {

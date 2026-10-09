@@ -17,12 +17,14 @@ import employeeService, {
   STATUS_TO_API, API_TO_STATUS, TYPE_TO_API, API_TO_TYPE,
 } from '@/services/employeeService'
 
+import departmentService from '@/services/departmentService'
+
 const PRIMARY  = '#C35E33'
 const ROLES    = { ADMIN: 'ADMIN', HR: 'HR' }
 const PAGE_SIZES   = [10, 25, 50, 100]
 const FILTER_TABS  = ['All', 'Internship', 'Training', 'Employee', 'Draft']
 
-const FILTER_CONFIG = [
+const INITIAL_FILTER_CONFIG = [
   { key: 'status', label: 'Status',      type: 'multi',  options: ['Active', 'Inactive', 'Hold'] },
   { key: 'type',   label: 'Type',        type: 'multi',  options: ['Employee', 'Internship', 'Training'] },
   { key: 'dept',   label: 'Department',  type: 'select', options: ['IT-Based', 'HR', 'Finance', 'Marketing'] },
@@ -423,6 +425,21 @@ export default function EmployeeList() {
   const [deleteTarget,  setDeleteTarget]  = useState(null)
   const [deleting,      setDeleting]      = useState(false)
 
+  const [filterConfig,  setFilterConfig]  = useState(INITIAL_FILTER_CONFIG)
+  const [statusModal,   setStatusModal]   = useState({ isOpen: false, id: null, apiStatus: '', displayLabel: '', reason: '' })
+
+  // Fetch departments dynamically for the filter config
+  useEffect(() => {
+    let mounted = true
+    departmentService.getAll({ page: 0, size: 200 }).then(res => {
+      if (!mounted) return
+      const items = res?.data?.data || res?.data || []
+      const deptNames = items.map(d => d.name || d.departmentName).filter(Boolean)
+      setFilterConfig(prev => prev.map(f => f.key === 'dept' ? { ...f, options: deptNames } : f))
+    }).catch(console.error)
+    return () => { mounted = false }
+  }, [])
+
   const apiParams = useMemo(() => {
     const p = { page: page - 1, size: pageSize, sortBy, sortDir }
     if (activeTab === 'Draft') {
@@ -480,17 +497,23 @@ export default function EmployeeList() {
     setPage(1)
   }
 
-  const handleStatusChange = async (id, apiStatus, displayLabel) => {
-    // Optimistic UI update for the employee row
-    setEmployees(prev => prev.map(e => e.id === id ? { ...e, status: displayLabel } : e))
+  const handleStatusChange = (id, apiStatus, displayLabel) => {
+    setStatusModal({ isOpen: true, id, apiStatus, displayLabel, reason: '' })
+  }
+
+  const confirmStatusChange = async () => {
+    if (!statusModal.reason.trim()) {
+      toast.error('Please provide a reason for the status change')
+      return
+    }
+    const { id, apiStatus, displayLabel, reason } = statusModal
     try {
-      await employeeService.updateStatus(id, apiStatus)
+      await employeeService.updateStatus(id, { status: apiStatus, reason })
       toast.success(`Status updated to ${displayLabel}`)
-      // Re-fetch to update the summary counts (Active/Inactive/Hold cards)
+      setStatusModal({ isOpen: false, id: null, apiStatus: '', displayLabel: '', reason: '' })
       fetchEmployees(false)
     } catch (err) {
       toast.error(err?.response?.data?.message || err?.message || 'Failed to update status')
-      fetchEmployees(false)
     }
   }
 
@@ -737,7 +760,12 @@ export default function EmployeeList() {
                           </div>
                         )}
                         <div>
-                          <p className="text-[13px] font-semibold text-gray-900 leading-none">{emp.fullName}</p>
+                          <p 
+                            className="text-[13px] font-semibold text-gray-900 leading-none"
+                            title={emp.fullName}
+                          >
+                            {emp.fullName.length > 25 ? emp.fullName.slice(0, 25) + '...' : emp.fullName}
+                          </p>
                           <p className="text-[10px] text-gray-400 mt-0.5">{emp.type}</p>
                         </div>
                       </div>
@@ -791,8 +819,47 @@ export default function EmployeeList() {
         onClose={() => setShowFilter(false)}
         onApply={f => { setActiveFilters(f); setPage(1) }}
         onReset={() => { setActiveFilters({}); setPage(1) }}
-        config={FILTER_CONFIG}
+        config={filterConfig}
+        initialValues={activeFilters}
       />
+
+      {statusModal.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm overflow-hidden p-6">
+            <h3 className="text-lg font-bold text-gray-900 mb-2">Change Status</h3>
+            <p className="text-sm text-gray-500 mb-4">
+              Are you sure you want to change this employee's status to <strong>{statusModal.displayLabel}</strong>?
+            </p>
+            <div className="mb-5">
+              <label className="block text-[13px] font-semibold text-gray-700 mb-1">
+                Reason <span className="text-red-500">*</span>
+              </label>
+              <textarea
+                value={statusModal.reason}
+                onChange={e => setStatusModal(p => ({ ...p, reason: e.target.value }))}
+                className="w-full text-sm border border-gray-300 rounded-lg p-2.5 outline-none focus:border-[#C35E33]"
+                rows={3}
+                placeholder="Enter a reason for this status change..."
+              />
+            </div>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setStatusModal({ isOpen: false, id: null, apiStatus: '', displayLabel: '', reason: '' })}
+                className="px-4 py-2 rounded-lg text-sm font-semibold text-gray-600 hover:bg-gray-100 transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmStatusChange}
+                className="px-4 py-2 rounded-lg text-sm font-semibold text-white transition-colors cursor-pointer"
+                style={{ backgroundColor: PRIMARY }}
+              >
+                Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <ConfirmModal
         isOpen={!!deleteTarget}

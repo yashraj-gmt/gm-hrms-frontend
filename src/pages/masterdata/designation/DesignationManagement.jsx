@@ -614,20 +614,12 @@ export default function DesignationManagement() {
                   className="hover:bg-orange-50 transition-colors"
                   style={{ backgroundColor: idx % 2 === 0 ? '#fff' : '#FAFAFA' }}
                 >
-                  <td className="px-4 py-3.5 text-xs font-semibold text-gray-400 border-b border-gray-50 w-10">
+                  <td className="px-4 py-3.5 text-[12px] sm:text-[13px] font-semibold text-gray-900 border-b border-gray-50 w-10">
                     {(safePage - 1) * PAGE_SIZE + idx + 1}
                   </td>
 
                   <td className="px-4 py-3.5 border-b border-gray-50">
-                    <div className="flex items-center gap-2.5">
-                      <div
-                        className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center text-white text-[10px] sm:text-[11px] font-bold flex-shrink-0"
-                        style={{ backgroundColor: PRIMARY }}
-                      >
-                        {row.name.charAt(0).toUpperCase()}
-                      </div>
-                      <span className="text-[12px] sm:text-[13px] font-semibold text-gray-900 whitespace-nowrap">{row.name}</span>
-                    </div>
+                    <span className="text-[12px] sm:text-[13px] font-semibold text-gray-900 whitespace-nowrap">{row.name}</span>
                   </td>
 
                   <td className="px-4 py-3.5 border-b border-gray-50 max-w-[160px] sm:max-w-xs">

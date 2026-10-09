@@ -222,7 +222,7 @@ function Pagination({ current, total, pageSize, onChange }) {
 function SkeletonRow() {
   return (
     <tr className="animate-pulse">
-      {[44, 28, 24, 24, 20, 16, 20, 16].map((w, i) => (
+      {[12, 44, 28, 24, 24, 20, 16, 20, 16].map((w, i) => (
         <td key={i} className="px-5 py-4 border-b border-gray-50">
           <div className="h-4 bg-gray-100 rounded" style={{ width: `${w * 3}px` }} />
         </td>
@@ -759,23 +759,83 @@ export default function BreakPolicies() {
       </div>
 
       {/* ── Stats — always show global totals, never changes with search ─────── */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
-        {[
-          { label: 'Total Policies', value: stats.total,    color: '#111827', bg: '#F3F4F6' },
-          { label: 'Active',         value: stats.active,   color: '#15803D', bg: '#DCFCE7' },
-          { label: 'Fixed',          value: stats.fixed,    color: '#1D4ED8', bg: '#DBEAFE' },
-          { label: 'Flexible',       value: stats.flexible, color: '#6D28D9', bg: '#F5F3FF' },
-        ].map(({ label, value, color, bg }) => (
-          <div key={label} className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ backgroundColor: bg }}>
-              <Coffee size={18} color={color} strokeWidth={1.8} />
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-5">
+
+        {/* Total Policies */}
+        <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ backgroundColor: '#F3F4F6' }}>
+            <Coffee size={18} color="#111827" strokeWidth={1.8} />
+          </div>
+          <div>
+            <p className="text-xl font-bold text-gray-900">{stats.total}</p>
+            <p className="text-[10px] text-gray-500 font-medium">Total Policies</p>
+          </div>
+        </div>
+
+        {/* Category — Fixed ÷ Flexible */}
+        <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+          {/* Card header */}
+          <div className="px-4 pt-3 pb-2 border-b border-gray-100 flex items-center gap-2">
+            <div className="w-6 h-6 rounded-lg flex items-center justify-center" style={{ backgroundColor: '#DBEAFE' }}>
+              <Coffee size={13} color="#1D4ED8" strokeWidth={1.8} />
             </div>
-            <div>
-              <p className="text-xl font-bold" style={{ color }}>{value}</p>
-              <p className="text-[10px] text-gray-500 font-medium">{label}</p>
+            <p className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Category</p>
+          </div>
+          {/* Bifurcated values */}
+          <div className="grid grid-cols-2 divide-x divide-gray-100">
+            <div className="px-4 py-3 flex flex-col items-center gap-0.5">
+              <p className="text-lg font-bold" style={{ color: '#1D4ED8' }}>{stats.fixed}</p>
+              <span
+                className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
+                style={{ backgroundColor: '#DBEAFE', color: '#1D4ED8' }}
+              >
+                Fixed
+              </span>
+            </div>
+            <div className="px-4 py-3 flex flex-col items-center gap-0.5">
+              <p className="text-lg font-bold" style={{ color: '#6D28D9' }}>{stats.flexible}</p>
+              <span
+                className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
+                style={{ backgroundColor: '#F5F3FF', color: '#6D28D9' }}
+              >
+                Flexible
+              </span>
             </div>
           </div>
-        ))}
+        </div>
+
+        {/* Status — Active ÷ Inactive */}
+        <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+          {/* Card header */}
+          <div className="px-4 pt-3 pb-2 border-b border-gray-100 flex items-center gap-2">
+            <div className="w-6 h-6 rounded-lg flex items-center justify-center" style={{ backgroundColor: '#DCFCE7' }}>
+              <Coffee size={13} color="#15803D" strokeWidth={1.8} />
+            </div>
+            <p className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Status</p>
+          </div>
+          {/* Bifurcated values */}
+          <div className="grid grid-cols-2 divide-x divide-gray-100">
+            <div className="px-4 py-3 flex flex-col items-center gap-0.5">
+              <p className="text-lg font-bold" style={{ color: '#15803D' }}>{stats.active}</p>
+              <span
+                className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
+                style={{ backgroundColor: '#DCFCE7', color: '#15803D' }}
+              >
+                Active
+              </span>
+            </div>
+            <div className="px-4 py-3 flex flex-col items-center gap-0.5">
+              <p className="text-lg font-bold" style={{ color: '#B91C1C' }}>{stats.total - stats.active}</p>
+              <span
+                className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
+                style={{ backgroundColor: '#FEE2E2', color: '#B91C1C' }}
+              >
+                Inactive
+              </span>
+            </div>
+          </div>
+        </div>
+
       </div>
 
       {/* ── Toolbar (search + filter only; refresh is in header) ─────────────── */}
@@ -870,7 +930,7 @@ export default function BreakPolicies() {
           <table className="w-full border-collapse" style={{ minWidth: 820 }}>
             <thead>
               <tr style={{ backgroundColor: PRIMARY }}>
-                {['Break Name', 'Category', 'Start Time', 'End Time', 'Duration', 'Paid', 'Status', 'Actions'].map((h) => (
+                {['#', 'Break Name', 'Category', 'Start Time', 'End Time', 'Duration', 'Paid', 'Status', 'Actions'].map((h) => (
                   <th
                     key={h}
                     className={`px-5 py-4 text-xs font-semibold text-white whitespace-nowrap ${h === 'Actions' ? 'text-center' : 'text-left'}`}
@@ -886,7 +946,7 @@ export default function BreakPolicies() {
                 : rows.length === 0
                   ? (
                     <tr>
-                      <td colSpan={8} className="px-5 py-14 text-center">
+                      <td colSpan={9} className="px-5 py-14 text-center">
                         <Coffee size={32} color="#E5E7EB" className="mx-auto mb-3" />
                         <p className="text-sm text-gray-400">No break policies found.</p>
                       </td>
@@ -898,16 +958,13 @@ export default function BreakPolicies() {
                       className="hover:bg-orange-50/50 transition-colors"
                       style={{ backgroundColor: idx % 2 === 0 ? '#fff' : '#FAFAFA' }}
                     >
+                      {/* Serial Number */}
+                      <td className="px-5 py-4 border-b border-gray-50 text-sm font-semibold text-gray-900 whitespace-nowrap">
+                        {(page - 1) * PAGE_SIZE + idx + 1}
+                      </td>
+
                       <td className="px-5 py-4 border-b border-gray-50">
-                        <div className="flex items-center gap-2.5">
-                          <div
-                            className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
-                            style={{ backgroundColor: PRIMARY_LIGHT }}
-                          >
-                            <Coffee size={14} color={PRIMARY} />
-                          </div>
-                          <span className="text-sm font-semibold text-gray-900">{row.name}</span>
-                        </div>
+                        <span className="text-sm font-semibold text-gray-900">{row.name}</span>
                       </td>
 
                       <td className="px-5 py-4 border-b border-gray-50">

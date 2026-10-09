@@ -9,7 +9,7 @@ import {
 } from 'lucide-react'
 import internCourseService from '@/services/internCourseService'
 import ConfirmModal        from '@/components/shared/ConfirmModal'
-import { useToast }        from '@/components/shared/toast/ToastProvider'
+import  { useToast }        from '@/components/shared/toast/ToastProvider'
 import { useAuthStore }    from '@/store/authStore'
 import { ROLES }           from '@/constants/roles'
 
@@ -275,10 +275,10 @@ function TableSkeleton() {
   return Array.from({ length: 6 }).map((_, i) => (
     <tr key={i} className="animate-pulse">
       <td className="px-5 py-4 border-b border-gray-50">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-gray-200 flex-shrink-0" />
-          <div className="h-3.5 w-36 bg-gray-200 rounded" />
-        </div>
+        <div className="h-3.5 w-6 bg-gray-200 rounded" />
+      </td>
+      <td className="px-5 py-4 border-b border-gray-50">
+        <div className="h-3.5 w-36 bg-gray-200 rounded" />
       </td>
       <td className="px-5 py-4 border-b border-gray-50">
         <div className="h-3 w-56 bg-gray-100 rounded" />
@@ -543,7 +543,7 @@ export default function InternCourseManagement() {
           <table className="w-full border-collapse" style={{ minWidth: 580 }}>
             <thead>
               <tr style={{ backgroundColor: PRIMARY }}>
-                {['Course Name', 'Description', 'Status', 'Action'].map((h) => (
+                {['#', 'Course Name', 'Description', 'Status', 'Action'].map((h) => (
                   <th key={h}
                     className={`px-5 py-3.5 text-left text-xs font-semibold text-white whitespace-nowrap ${h === 'Action' ? 'text-center' : ''}`}>
                     {h}
@@ -556,7 +556,7 @@ export default function InternCourseManagement() {
                 <TableSkeleton />
               ) : filteredCourses.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="px-4 py-14 text-center text-sm text-gray-400">
+                  <td colSpan={5} className="px-4 py-14 text-center text-sm text-gray-400">
                     {search || statusFilter !== 'ALL'
                       ? 'No courses match your search or filter.'
                       : 'No courses found.'}
@@ -568,15 +568,14 @@ export default function InternCourseManagement() {
                     className="hover:bg-orange-50 transition-colors"
                     style={{ backgroundColor: idx % 2 === 0 ? '#fff' : '#FAFAFA' }}>
 
+                    {/* Serial Number */}
+                    <td className="px-5 py-4 border-b border-gray-50 text-[13px] font-semibold text-gray-900 whitespace-nowrap">
+                      {safePage * PAGE_SIZE + idx + 1}
+                    </td>
+
                     {/* Course Name */}
                     <td className="px-5 py-4 border-b border-gray-50 whitespace-nowrap">
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-lg flex items-center justify-center text-white text-[11px] font-bold flex-shrink-0"
-                          style={{ backgroundColor: row.active ? PRIMARY : '#9CA3AF' }}>
-                          {row.name.charAt(0).toUpperCase()}
-                        </div>
-                        <span className="text-[13px] font-semibold text-gray-900">{row.name}</span>
-                      </div>
+                      <span className="text-[13px] font-semibold text-gray-900">{row.name}</span>
                     </td>
 
                     {/* Description */}

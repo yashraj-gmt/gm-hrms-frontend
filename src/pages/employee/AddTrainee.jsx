@@ -47,6 +47,13 @@ const PAN_RE   = /^[A-Z]{5}\d{4}[A-Z]$/
 const ADHAR_RE = /^\d{12}$/
 const IFSC_RE  = /^[A-Z]{4}0[A-Z0-9]{6}$/
 
+// Max date for DOB = today minus 15 years
+const getMaxDob = () => {
+  const d = new Date()
+  d.setFullYear(d.getFullYear() - 15)
+  return d.toISOString().split('T')[0]
+}
+
 const API_TO_WMODE  = { REMOTE: 'Remote', HYBRID: 'Hybrid', ONSITE: 'On site', ON_SITE: 'On site' }
 const API_TO_WTYPE  = { FULL_TIME: 'Full-time', PART_TIME: 'Part-time', CONTRACTUAL: 'Contractual' }
 const API_TO_STATUS = { ACTIVE: 'Active', INACTIVE: 'Inactive', ON_HOLD: 'On Hold' }
@@ -83,7 +90,15 @@ function buildErrors(p, office, training, edu, addr, bank, docs, docReasons, doc
   if (!p.middleName.trim())  errs.middleName    = 'Middle name is required'
   if (!p.lastName.trim())    errs.lastName      = 'Last name is required'
   if (!p.gender)             errs.gender        = 'Gender is required'
-  if (!p.dob)                errs.dob           = 'Date of birth is required'
+  if (!p.dob) {
+    errs.dob = 'Date of birth is required'
+  } else {
+    const today = new Date()
+    const dob   = new Date(p.dob)
+    const age   = today.getFullYear() - dob.getFullYear() -
+      (today < new Date(today.getFullYear(), dob.getMonth(), dob.getDate()) ? 1 : 0)
+    if (age < 15) errs.dob = 'Employee must be at least 15 years old'
+  }
   if (!p.maritalStatus)      errs.maritalStatus = 'Marital status is required'
   if (!p.spouseName.trim())  errs.spouseName    = 'Spouse / parent name is required'
 
@@ -175,15 +190,18 @@ function ErrorMsg({ msg }) {
   return msg ? <p className="text-[11px] text-red-500 mt-0.5">{msg}</p> : null
 }
 
-function TextInput({ placeholder, type = 'text', value, onChange, error, className = '', numericOnly = false, readOnly = false }) {
+function TextInput({ placeholder, type = 'text', value, onChange, error, className = '', numericOnly = false, alphabetsOnly = false, readOnly = false, maxLength, max }) {
   const h = (e) => {
-    if (numericOnly) onChange({ target: { value: e.target.value.replace(/\D/g, '') } })
-    else onChange(e)
+    let v = e.target.value
+    if (numericOnly)   v = v.replace(/\D/g, '')
+    if (alphabetsOnly) v = v.replace(/[^A-Za-z ]/g, '')
+    onChange({ target: { value: v } })
   }
   return (
     <>
       <input
         type={type} placeholder={placeholder} value={value} onChange={h} readOnly={readOnly}
+        maxLength={maxLength} max={max}
         className={`w-full h-9 px-3 text-sm text-gray-700 bg-gray-50 border rounded-lg outline-none transition-colors placeholder:text-gray-400
           ${error       ? 'border-red-400 focus:border-red-500'
           : readOnly    ? 'border-gray-100 bg-gray-100 cursor-not-allowed opacity-70'
@@ -208,27 +226,47 @@ function SelectInput({ children, value, onChange, error }) {
 }
 
 function PhoneInput({ code = '+91', onCodeChange, value, onChange, error }) {
+  const [customMode, setCustomMode] = useState(false)
+  const presetCodes = ['+91','+1','+44','+971','+65','+61','+966','+968','+974','+973','+965']
   const h = (e) => onChange({ target: { value: e.target.value.replace(/\D/g, '').slice(0, 10) } })
+  const handleCodeInput = (e) => {
+    const v = e.target.value.replace(/[^+\d]/g, '')
+    onCodeChange({ target: { value: v } })
+  }
   return (
     <>
       <div className="flex h-9">
-        <select
-          value={code}
-          onChange={onCodeChange}
-          className="flex items-center px-1 bg-gray-50 border border-r-0 border-gray-200 rounded-l-lg text-xs text-gray-500 outline-none cursor-pointer"
-        >
-          <option value="+91">+91</option>
-          <option value="+1">+1</option>
-          <option value="+44">+44</option>
-          <option value="+971">+971</option>
-          <option value="+65">+65</option>
-          <option value="+61">+61</option>
-          <option value="+966">+966</option>
-          <option value="+968">+968</option>
-          <option value="+974">+974</option>
-          <option value="+973">+973</option>
-          <option value="+965">+965</option>
-        </select>
+        {customMode ? (
+          <input
+            type="text" value={code} onChange={handleCodeInput}
+            placeholder="+91" maxLength={6}
+            className="w-16 px-1 bg-gray-50 border border-r-0 border-gray-200 rounded-l-lg text-xs text-gray-500 outline-none"
+          />
+        ) : (
+          <select
+            value={presetCodes.includes(code) ? code : '+91'}
+            onChange={onCodeChange}
+            className="flex items-center px-1 bg-gray-50 border border-r-0 border-gray-200 rounded-l-lg text-xs text-gray-500 outline-none cursor-pointer"
+          >
+            <option value="+91">+91</option>
+            <option value="+1">+1</option>
+            <option value="+44">+44</option>
+            <option value="+971">+971</option>
+            <option value="+65">+65</option>
+            <option value="+61">+61</option>
+            <option value="+966">+966</option>
+            <option value="+968">+968</option>
+            <option value="+974">+974</option>
+            <option value="+973">+973</option>
+            <option value="+965">+965</option>
+          </select>
+        )}
+        <button
+          type="button"
+          title={customMode ? 'Use dropdown' : 'Enter custom code'}
+          onClick={() => setCustomMode(m => !m)}
+          className="px-1 bg-gray-50 border-t border-b border-gray-200 text-gray-400 hover:text-gray-600 text-[10px] leading-none"
+        >{customMode ? '▼' : '✎'}</button>
         <input type="tel" inputMode="numeric" placeholder="9876543210" value={value} onChange={h} maxLength={10}
           className={`flex-1 min-w-0 px-2 text-sm text-gray-700 bg-gray-50 border rounded-r-lg outline-none transition-colors
             ${error ? 'border-red-400' : 'border-gray-200 focus:border-[#C35E33]'}`} />
@@ -876,7 +914,7 @@ useEffect(() => {
     }, 0)
 
     return () => clearTimeout(timer)
-  }, [departments, designations, branches, shifts, isAddMode])
+  }, [departments, designations, branches, shifts, isAddMode, office.designation, office.department, office.workLocation, office.shiftName])
 
   // ── Helpers ──────────────────────────────────────────────────────────────
   const up  = f => e => setPersonal(p  => ({ ...p,  [f]: e.target?.value ?? e }))
@@ -1070,17 +1108,11 @@ const handleUpdate = async () => {
   try {
     const fd = buildPayload(isDraftMode)
 
-    console.log('traineeDbId:', traineeDbId, '| personalInformationId (id):', id)
-
-    if (traineeDbId) {
-      await apiClient.patch(`/trainees/${traineeDbId}`, fd, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      })
-    } else {
-      await apiClient.patch(`/trainees/personal/${id}`, fd, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      })
-    }
+    // Always PATCH /api/trainees/:id where id = personalInformationId
+    // Backend now resolves by personalInformationId
+    await apiClient.patch(`/trainees/${id}`, fd, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
 
     toast.success(isDraftMode ? 'Draft saved successfully' : 'Trainee updated successfully')
     navigate('/employee')

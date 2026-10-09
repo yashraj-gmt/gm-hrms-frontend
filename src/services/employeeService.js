@@ -117,10 +117,10 @@ const employeeService = {
   /**
    * PATCH /api/employees/:id/status
    * @param {number|string} id
-   * @param {string}        status  'ACTIVE' | 'INACTIVE' | 'ON_HOLD'
+   * @param {Object} payload  { status, reason }
    */
-  updateStatus: (id, status) =>
-    apiClient.patch(`/employees/${id}/status`, { status }),
+  updateStatus: (id, payload) =>
+    apiClient.patch(`/employees/${id}/status`, payload),
 
   /**
    * DELETE /api/employees/:id  (ADMIN only)

@@ -12,44 +12,44 @@ const PRIMARY = '#C35E33'
 
 // ─── Data ─────────────────────────────────────────────────────────────────────
 const STATS = [
-  { label: 'Total Employees', value: 22, Icon: Users      },
-  { label: 'Present Today',   value: 41, Icon: Clock      },
-  { label: 'On Leave',        value: 58, Icon: UserMinus  },
-  { label: 'Total Projects',  value: 13, Icon: FolderOpen },
+  { label: 'Total Employees', value: 112, Icon: Users      },
+  { label: 'Present Today',   value: 85,  Icon: Clock      },
+  { label: 'On Leave',        value: 5,   Icon: UserMinus  },
+  { label: 'Total Projects',  value: 240, Icon: FolderOpen },
 ]
 
 const EMP_DATA   = [
-  { name: 'Total employee', value: 100 },
-  { name: 'Active',         value: 62  },
-  { name: 'inactive',       value: 50  },
+  { name: 'Total employee', value: 112 },
+  { name: 'Active',         value: 90  },
+  { name: 'inactive',       value: 22  },
 ]
 const EMP_COLORS = ['#C35E33', '#22C55E', '#EF4444']
 
 const ATTENDANCE_DATA = [
-  { m: 'Jan', Ontime: 18, 'Late In': 4, Absent: 2 },
-  { m: 'Feb', Ontime: 20, 'Late In': 5, Absent: 1 },
-  { m: 'Mar', Ontime: 16, 'Late In': 6, Absent: 3 },
-  { m: 'Apr', Ontime: 22, 'Late In': 3, Absent: 2 },
-  { m: 'May', Ontime: 19, 'Late In': 5, Absent: 1 },
-  { m: 'Jun', Ontime: 21, 'Late In': 4, Absent: 2 },
-  { m: 'Jul', Ontime: 17, 'Late In': 7, Absent: 3 },
-  { m: 'Aug', Ontime: 20, 'Late In': 4, Absent: 2 },
-  { m: 'Sep', Ontime: 18, 'Late In': 5, Absent: 1 },
-  { m: 'Oct', Ontime: 22, 'Late In': 3, Absent: 2 },
-  { m: 'Nov', Ontime: 19, 'Late In': 6, Absent: 1 },
-  { m: 'Dec', Ontime: 21, 'Late In': 4, Absent: 2 },
+  { m: 'Jan', Ontime: 72, 'Late In': 12, Absent: 6 },
+  { m: 'Feb', Ontime: 75, 'Late In': 10, Absent: 5 },
+  { m: 'Mar', Ontime: 70, 'Late In': 15, Absent: 5 },
+  { m: 'Apr', Ontime: 80, 'Late In': 8,  Absent: 2 },
+  { m: 'May', Ontime: 74, 'Late In': 11, Absent: 5 },
+  { m: 'Jun', Ontime: 78, 'Late In': 9,  Absent: 3 },
+  { m: 'Jul', Ontime: 70, 'Late In': 14, Absent: 6 },
+  { m: 'Aug', Ontime: 76, 'Late In': 10, Absent: 4 },
+  { m: 'Sep', Ontime: 73, 'Late In': 12, Absent: 5 },
+  { m: 'Oct', Ontime: 79, 'Late In': 8,  Absent: 3 },
+  { m: 'Nov', Ontime: 75, 'Late In': 12, Absent: 3 },
+  { m: 'Dec', Ontime: 77, 'Late In': 9,  Absent: 4 },
 ]
 
 const LEAVE_DATA = [
-  { name: 'Paternity',    value: 88 },
-  { name: 'Floater',      value: 88 },
-  { name: 'Birthday',     value: 74 },
-  { name: 'Maternity',    value: 60 },
-  { name: 'Comp Off',     value: 43 },
-  { name: 'Unpaid Leave', value: 28 },
-  { name: 'Paid Leave',   value: 17 },
-  { name: 'CL',           value: 13 },
-  { name: 'SL',           value: 10 },
+  { name: 'CL',           value: 120 },
+  { name: 'SL',           value: 90 },
+  { name: 'Paid Leave',   value: 50 },
+  { name: 'Comp Off',     value: 30 },
+  { name: 'Unpaid Leave', value: 20 },
+  { name: 'Birthday',     value: 15 },
+  { name: 'Paternity',    value: 5 },
+  { name: 'Maternity',    value: 3 },
+  { name: 'Floater',      value: 2 },
 ]
 const LEAVE_COLORS = [
   '#4A90D9','#F5A623','#E74C3C','#2ECC71',
@@ -57,21 +57,21 @@ const LEAVE_COLORS = [
 ]
 
 const TIMESHEET_DATA = [
-  { day: 'Mon', Target: 7,  Overtime: 0, Undertime: 1 },
-  { day: 'Tu',  Target: 8,  Overtime: 1, Undertime: 0 },
-  { day: 'Wed', Target: 9,  Overtime: 0, Undertime: 0 },
-  { day: 'Thu', Target: 8,  Overtime: 0, Undertime: 0 },
+  { day: 'Mon', Target: 8,  Overtime: 1, Undertime: 0 },
+  { day: 'Tu',  Target: 8,  Overtime: 2, Undertime: 0 },
+  { day: 'Wed', Target: 8,  Overtime: 0, Undertime: 0 },
+  { day: 'Thu', Target: 8,  Overtime: 0, Undertime: 1 },
   { day: 'Fri', Target: 8,  Overtime: 0, Undertime: 2 },
-  { day: 'Sat', Target: 6,  Overtime: 0, Undertime: 0 },
-  { day: 'Sun', Target: 4,  Overtime: 0, Undertime: 0 },
+  { day: 'Sat', Target: 0,  Overtime: 4, Undertime: 0 },
+  { day: 'Sun', Target: 0,  Overtime: 0, Undertime: 0 },
 ]
 
 const PROJECT_DATA = [
-  { name: 'Ready For Handover', value: 100, color: '#6366F1' },
-  { name: 'On Hold',            value: 20,  color: '#EF4444' },
-  { name: 'Completed',          value: 62,  color: '#22C55E' },
-  { name: 'In Progress',        value: 50,  color: '#F97316' },
-  { name: 'Not Started',        value: 28,  color: '#06B6D4' },
+  { name: 'Ready For Handover', value: 80, color: '#6366F1' },
+  { name: 'On Hold',            value: 20, color: '#EF4444' },
+  { name: 'Completed',          value: 60, color: '#22C55E' },
+  { name: 'In Progress',        value: 50, color: '#F97316' },
+  { name: 'Not Started',        value: 30, color: '#06B6D4' },
 ]
 
 const CHAT_DATA = [

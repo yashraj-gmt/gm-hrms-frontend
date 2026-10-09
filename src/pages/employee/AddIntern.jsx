@@ -46,6 +46,15 @@ const PAN_RE   = /^[A-Z]{5}\d{4}[A-Z]$/
 const ADHAR_RE = /^\d{12}$/
 const IFSC_RE  = /^[A-Z]{4}0[A-Z0-9]{6}$/
 
+// Max date for DOB = today minus 15 years
+const getMaxDob = () => {
+  const d = new Date()
+  d.setFullYear(d.getFullYear() - 15)
+  return d.toISOString().split('T')[0]
+}
+
+
+
 const API_TO_STATUS = { ACTIVE: 'Active', INACTIVE: 'Inactive', ON_HOLD: 'On Hold' }
 const STATUS_TO_API = { Active: 'ACTIVE', Inactive: 'INACTIVE', 'On Hold': 'ON_HOLD' }
 
@@ -81,7 +90,15 @@ function buildErrors(p, office, internship, college, addr, bank, docs, docReason
   if (!p.middleName.trim())  errs.middleName    = 'Middle name is required'
   if (!p.lastName.trim())    errs.lastName      = 'Last name is required'
   if (!p.gender)             errs.gender        = 'Gender is required'
-  if (!p.dob)                errs.dob           = 'Date of birth is required'
+  if (!p.dob) {
+    errs.dob = 'Date of birth is required'
+  } else {
+    const today = new Date()
+    const dob   = new Date(p.dob)
+    const age   = today.getFullYear() - dob.getFullYear() -
+      (today < new Date(today.getFullYear(), dob.getMonth(), dob.getDate()) ? 1 : 0)
+    if (age < 15) errs.dob = 'Intern must be at least 15 years old'
+  }
   if (!p.maritalStatus)      errs.maritalStatus = 'Marital status is required'
   if (!p.spouseName.trim())  errs.spouseName    = 'Spouse / parent name is required'
 
@@ -235,27 +252,47 @@ function SelectInput({ children, value, onChange, error }) {
 }
 
 function PhoneInput({ code = '+91', onCodeChange, value, onChange, error }) {
+  const [customMode, setCustomMode] = useState(false)
+  const presetCodes = ['+91','+1','+44','+971','+65','+61','+966','+968','+974','+973','+965']
   const h = (e) => onChange({ target: { value: e.target.value.replace(/\D/g, '').slice(0, 10) } })
+  const handleCodeInput = (e) => {
+    const v = e.target.value.replace(/[^+\d]/g, '')
+    onCodeChange({ target: { value: v } })
+  }
   return (
     <>
       <div className="flex h-9">
-        <select
-          value={code}
-          onChange={onCodeChange}
-          className="flex items-center px-1 bg-gray-50 border border-r-0 border-gray-200 rounded-l-lg text-xs text-gray-500 outline-none cursor-pointer"
-        >
-          <option value="+91">+91</option>
-          <option value="+1">+1</option>
-          <option value="+44">+44</option>
-          <option value="+971">+971</option>
-          <option value="+65">+65</option>
-          <option value="+61">+61</option>
-          <option value="+966">+966</option>
-          <option value="+968">+968</option>
-          <option value="+974">+974</option>
-          <option value="+973">+973</option>
-          <option value="+965">+965</option>
-        </select>
+        {customMode ? (
+          <input
+            type="text" value={code} onChange={handleCodeInput}
+            placeholder="+91" maxLength={6}
+            className="w-16 px-1 bg-gray-50 border border-r-0 border-gray-200 rounded-l-lg text-xs text-gray-500 outline-none"
+          />
+        ) : (
+          <select
+            value={presetCodes.includes(code) ? code : '+91'}
+            onChange={onCodeChange}
+            className="flex items-center px-1 bg-gray-50 border border-r-0 border-gray-200 rounded-l-lg text-xs text-gray-500 outline-none cursor-pointer"
+          >
+            <option value="+91">+91</option>
+            <option value="+1">+1</option>
+            <option value="+44">+44</option>
+            <option value="+971">+971</option>
+            <option value="+65">+65</option>
+            <option value="+61">+61</option>
+            <option value="+966">+966</option>
+            <option value="+968">+968</option>
+            <option value="+974">+974</option>
+            <option value="+973">+973</option>
+            <option value="+965">+965</option>
+          </select>
+        )}
+        <button
+          type="button"
+          title={customMode ? 'Use dropdown' : 'Enter custom code'}
+          onClick={() => setCustomMode(m => !m)}
+          className="px-1 bg-gray-50 border-t border-b border-gray-200 text-gray-400 hover:text-gray-600 text-[10px] leading-none"
+        >{customMode ? '▼' : '✎'}</button>
         <input type="tel" inputMode="numeric" placeholder="9876543210" value={value} onChange={h} maxLength={10}
           className={`flex-1 min-w-0 px-2 text-sm text-gray-700 bg-gray-50 border rounded-r-lg outline-none transition-colors
             ${error ? 'border-red-400' : 'border-gray-200 focus:border-[#C35E33]'}`} />
@@ -605,12 +642,14 @@ export default function AddIntern() {
   const [shifts,        setShifts]        = useState([])
   const [domains,       setDomains]       = useState([])
   const [docTypes,      setDocTypes]      = useState([])
+  const [managers,      setManagers]      = useState([])
   const [deptLoading,   setDeptLoading]   = useState(true)
   const [desigLoading,  setDesigLoading]  = useState(true)
   const [branchLoading, setBranchLoading] = useState(true)
   const [shiftLoading,  setShiftLoading]  = useState(true)
   const [domainLoading, setDomainLoading] = useState(true)
   const [docLoading,    setDocLoading]    = useState(true)
+  const [mgrLoading,    setMgrLoading]    = useState(true)
 
   // ── Form state 
   const [personal, setPersonal] = useState({
@@ -627,7 +666,7 @@ export default function AddIntern() {
     officeEmail: '',
     workLocation: '', workLocationId: null,
     shiftId: null,   shiftName: '',
-    reportingManager: '',
+    reportingManager: '', reportingManagerId: null,
     status: 'Active',
   })
 
@@ -912,7 +951,7 @@ export default function AddIntern() {
     }, 0)
 
     return () => clearTimeout(timer)
-  }, [departments, designations, branches, shifts, domains, isAddMode])
+  }, [departments, designations, branches, shifts, domains, isAddMode, office.designation, office.department, office.workLocation, office.shiftName, internship.domainName])
 
   // ── Helpers ──────────────────────────────────────────────────────────────
   const up  = f => e => setPersonal(p  => ({ ...p,  [f]: e.target?.value ?? e }))
@@ -1103,14 +1142,11 @@ export default function AddIntern() {
     setSubmitting(true)
     try {
       const fd = buildPayload(isDraftMode)
-      if (internDbId) {
-        // PATCH /api/interns/:internDbId
-        await apiClient.patch(`/interns/${internDbId}`, fd, {
-          headers: { 'Content-Type': 'multipart/form-data' },
-        })
-      } else {
-        await employeeService.update(id, fd)
-      }
+      // Always PATCH /api/interns/:id where id = personalInformationId
+      // Backend resolves by personalInformationId after the fix
+      await apiClient.patch(`/interns/${id}`, fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
       toast.success(isDraftMode ? 'Draft saved successfully' : 'Intern updated successfully')
       navigate('/employee')
     } catch (err) {
@@ -1209,16 +1245,19 @@ export default function AddIntern() {
               <div data-error={!!errors.firstName}>
                 <FieldLabel required>First Name</FieldLabel>
                 <TextInput placeholder="First Name" value={personal.firstName} error={errors.firstName}
+                  alphabetsOnly
                   onChange={e => { up('firstName')(e); clearError('firstName') }} />
               </div>
               <div data-error={!!errors.middleName}>
                 <FieldLabel required>Middle Name</FieldLabel>
                 <TextInput placeholder="Middle Name" value={personal.middleName} error={errors.middleName}
+                  alphabetsOnly
                   onChange={e => { up('middleName')(e); clearError('middleName') }} />
               </div>
               <div data-error={!!errors.lastName}>
                 <FieldLabel required>Last Name</FieldLabel>
                 <TextInput placeholder="Last Name" value={personal.lastName} error={errors.lastName}
+                  alphabetsOnly
                   onChange={e => { up('lastName')(e); clearError('lastName') }} />
               </div>
               <div data-error={!!errors.gender}>
@@ -1235,7 +1274,7 @@ export default function AddIntern() {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
               <div data-error={!!errors.dob}>
                 <FieldLabel required>Date of Birth</FieldLabel>
-                <TextInput type="date" value={personal.dob} error={errors.dob}
+                <TextInput type="date" value={personal.dob} error={errors.dob} max={getMaxDob()}
                   onChange={e => { up('dob')(e); clearError('dob') }} />
               </div>
               <div data-error={!!errors.personalPhone}>
@@ -1280,6 +1319,7 @@ export default function AddIntern() {
               <div data-error={!!errors.spouseName}>
                 <FieldLabel required>Spouse / Parent Name</FieldLabel>
                 <TextInput placeholder="Name" value={personal.spouseName} error={errors.spouseName}
+                  alphabetsOnly
                   onChange={e => { up('spouseName')(e); clearError('spouseName') }} />
               </div>
             </div>
@@ -1604,8 +1644,8 @@ export default function AddIntern() {
               </div>
               <div data-error={!!errors.accountNumber}>
                 <FieldLabel required>Account Number</FieldLabel>
-                <TextInput type="password" placeholder="••••••••••••" value={bank.accountNumber}
-                  numericOnly error={errors.accountNumber}
+                <TextInput type="text" placeholder="Enter account number" value={bank.accountNumber}
+                  numericOnly maxLength={18} error={errors.accountNumber}
                   onChange={e => { upb('accountNumber')(e); clearError('accountNumber') }} />
               </div>
               <div data-error={!!errors.ifscCode}>
@@ -1622,7 +1662,7 @@ export default function AddIntern() {
               </div>
               <div data-error={!!errors.aadhaarNumber}>
                 <FieldLabel required>Aadhaar Card Number</FieldLabel>
-                <TextInput placeholder="123456789012" value={bank.aadhaarNumber} numericOnly error={errors.aadhaarNumber}
+                <TextInput placeholder="123456789012" value={bank.aadhaarNumber} numericOnly maxLength={12} error={errors.aadhaarNumber}
                   onChange={e => { upb('aadhaarNumber')(e); clearError('aadhaarNumber') }} />
               </div>
               <div>
